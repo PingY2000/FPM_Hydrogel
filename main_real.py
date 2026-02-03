@@ -7,8 +7,6 @@ import ptych
 import os
 import json
 
-
-# 从我们的 ptych 包和新的 utils 文件导入函数
 from ptych import solve_inverse
 from utils import (
     get_default_device,
@@ -37,8 +35,8 @@ WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 532)        # LED 波长 (nm)
 MAGNIFICATION = config_data.get('MAGNIFICATION', 10.0)       # 物镜放大倍率
 CAMERA_PIXEL_SIZE_UM = config_data.get('CAMERA_PIXEL_SIZE_UM', 3.45) # 相机像素尺寸 (um)
 
-print(f"--- 系统参数已加载 ---")
-print(f"NA: {NA_OBJECTIVE}, Wavelength: {WAVELENGTH_NM}nm, Mag: {MAGNIFICATION}x, CAMERA_PIXEL_SIZE:{CAMERA_PIXEL_SIZE_UM}")
+#print(f"--- 系统参数已加载 ---")
+print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x\nAMERA_PIXEL_SIZE:{CAMERA_PIXEL_SIZE_UM}\n")
 
 # B. 数据和重建参数
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 你存放真实图像的文件夹
@@ -111,7 +109,7 @@ visualize_kspace_and_captures(
     captures=captures,
     kx_normalized=kx_estimated,
     ky_normalized=ky_estimated,
-    arrow_scale=500.0 # <-- 这是一个可调参数，如果箭头太长或太短，请修改它
+    arrow_scale=500.0 
 )
 # ========================================================
 
@@ -130,15 +128,14 @@ reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
     ky_batch=ky_estimated,
     learn_pupil=True,       # 必须开启以校正像差
     learn_k_vectors=False,   # 强烈推荐开启以修正k-vector误差
-    # 注意: 你可能需要修改 solve_inverse 函数来接受 epochs 和 lr 作为参数
-    # 如果 solve_inverse 内部写死了 epochs=100, lr=0.1, 那么这里的参数无效
+    epochs=500
 )
 print("Reconstruction finished.")
 
 
 # --- 6. 可视化结果 ---
 # ----------------------------------------------------
-print("Visualizing results...")
+#print("Visualizing results...")
 
 # A. 可视化损失曲线
 plt.figure(figsize=(10, 5))
@@ -147,7 +144,7 @@ plt.title("Loss Curve")
 plt.xlabel("Epoch")
 plt.ylabel("L1 Loss")
 plt.grid(True)
-plt.savefig("tmp/real_data_loss_curve.png")
+plt.savefig("output/real_data_loss_curve.png")
 
 # B. 可视化重建的物体
 final_amplitude = torch.abs(reconstructed_object)
@@ -163,7 +160,7 @@ axes[1].set_title("Reconstructed Phase")
 fig.colorbar(im2, ax=axes[1])
 
 plt.suptitle("Final Reconstruction", fontsize=16)
-plt.savefig("tmp/final_reconstruction.png")
+plt.savefig("output/final_reconstruction.png")
 
 # C. 可视化学习到的光瞳 (非常重要!)
 learned_pupil_amp = torch.abs(reconstructed_pupil)
@@ -179,7 +176,8 @@ axes[1].set_title("Learned Pupil Phase (System Aberration)")
 fig.colorbar(im4, ax=axes[1])
 
 plt.suptitle("Learned Pupil Function", fontsize=16)
-plt.savefig("tmp/learned_pupil.png")
+plt.savefig("output/learned_pupil.png")
 
-print("\nAll plots saved to 'tmp/' folder.")
-# plt.show() # 如果你想在运行时弹出所有窗口
+print("\nAll plots saved to 'output' folder.")
+#plt.show() # 如果你想在运行时弹出所有窗口
+

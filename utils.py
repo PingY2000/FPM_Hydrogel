@@ -153,7 +153,7 @@ def visualize_kspace_and_captures(
     captures: torch.Tensor,
     kx_normalized: torch.Tensor,
     ky_normalized: torch.Tensor,
-    output_filename: str = "tmp/capture_orientation_validation.png",
+    output_filename: str = "output/capture_orientation_validation.png",
     arrow_scale: float = 500.0 
 ):
     """
@@ -208,8 +208,8 @@ def visualize_kspace_and_captures(
                 ax.arrow(
                     center_x-arrow_dx, 
                     center_y-arrow_dy, 
-                    arrow_dx, 
-                    arrow_dy,
+                    arrow_dx*0.5, 
+                    arrow_dy*0.5,
                     head_width=9.0,
                     head_length=12.0,
                     fc='red', # 箭头填充颜色

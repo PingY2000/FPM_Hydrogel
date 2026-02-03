@@ -10,6 +10,7 @@ __pycache__/
 tmp/
 temp/
 TEMP/
+output/
 
 # IDE 和编辑器生成的文件
 *.swp
