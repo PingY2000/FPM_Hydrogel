@@ -1,0 +1,41 @@
+# Python 生成的缓存文件
+__pycache__/
+*.pyc
+*$py.class
+*.pyo
+*.pyd
+*.pyi
+
+# 临时文件夹
+tmp/
+temp/
+TEMP/
+
+# IDE 和编辑器生成的文件
+*.swp
+*.swo
+*.swn
+*.bak
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 虚拟环境
+venv/
+env/
+ENV/
+virtualenv/
+.venv/
+
+# 本地配置文件
+.local/
+.settings/
+
+# 其他可能的临时文件
+*.tmp
+*.temp
+
+# 忽略所有 .pyc 文件
+*.pyc
