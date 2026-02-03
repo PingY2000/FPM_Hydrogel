@@ -4,6 +4,8 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import ptych
+import os
+import json
 
 
 # 从我们的 ptych 包和新的 utils 文件导入函数
@@ -18,17 +20,28 @@ from utils import (
 
 
 # --- 1. 用户配置 (User Configuration) ---
-# 请根据你的实际实验装置和数据填写此部分！
 # ----------------------------------------------------
 
-# A. 系统物理参数
-NA_OBJECTIVE = 0.5          # 物镜 NA
-WAVELENGTH_NM = 532         # LED 波长 (nm)
-MAGNIFICATION = 10.0        # 物镜放大倍率 (e.g., 10x)
-CAMERA_PIXEL_SIZE_UM = 3.45 # 相机像素尺寸 (um)
+# 定义配置文件路径
+CONFIG_JSON_PATH = r"D:\FPM_Dataset\OnTest\param.json"
+
+if not os.path.exists(CONFIG_JSON_PATH):
+    raise FileNotFoundError(f"找不到配置文件: {CONFIG_JSON_PATH}")
+
+with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
+    config_data = json.load(f)
+
+# A. 从 JSON 中读取系统物理参数
+NA_OBJECTIVE = config_data.get('NA_OBJECTIVE', 0.5)          # 物镜 NA
+WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 532)        # LED 波长 (nm)
+MAGNIFICATION = config_data.get('MAGNIFICATION', 10.0)       # 物镜放大倍率
+CAMERA_PIXEL_SIZE_UM = config_data.get('CAMERA_PIXEL_SIZE_UM', 3.45) # 相机像素尺寸 (um)
+
+print(f"--- 系统参数已加载 ---")
+print(f"NA: {NA_OBJECTIVE}, Wavelength: {WAVELENGTH_NM}nm, Mag: {MAGNIFICATION}x, CAMERA_PIXEL_SIZE:{CAMERA_PIXEL_SIZE_UM}")
 
 # B. 数据和重建参数
-CAPTURES_PATH = "D:\FPM_Dataset\OnTest" # 你存放真实图像的文件夹
+CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 你存放真实图像的文件夹
 LED_POSITIONS_FILE = "led_positions.csv" # 你的LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 1       # 你的 captures 是否被下采样了？如果是256x256，可能不需要再下采样，设为1

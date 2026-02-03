@@ -8,6 +8,7 @@ import pandas as pd
 import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+import os
 
 def get_default_device() -> torch.device:
     """获取默认的计算设备 (CUDA, MPS, or CPU)"""
@@ -17,48 +18,57 @@ def get_default_device() -> torch.device:
         return torch.device("mps")
     return torch.device("cpu")
 
+def decode_hex_to_led_index(hex_str: str) -> int:
+    """
+    核心解码逻辑：
+    1. 十六进制转为整数
+    2. 转为 43 位标准二进制字符串 (MSB first)
+    3. 翻转字符串以还原“小端序” (LSB first)
+    4. 查找 '1' 出现的位置并 +1 得到索引
+    """
+    val = int(hex_str, 16)
+    # 填充为 43 位二进制
+    bin_msb = f"{val:043b}"
+    # 翻转，还原为小的位在前
+    bin_lsb = bin_msb[::-1]
+    
+    index = bin_lsb.find('1') + 1
+    return index
+
 def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[torch.Tensor, list[int]]:
     """
-    从文件夹加载一系列图像，并根据文件名中的二进制编码解析LED索引。
-
-    文件名示例: snapshot_..._1000...000.tif, 其中 '1' 的位置代表LED索引。
-
-    Args:
-        folder_path (str): 存放图像的文件夹路径。
-        file_pattern (str): 匹配图像文件的模式，例如 "*.tif"。
-
-    Returns:
-        tuple[torch.Tensor, list[int]]: 
-            - captures (torch.Tensor): 按LED索引排序的图像张量 [B, H, W]。
-            - led_indices (list[int]): 与captures张量对应的LED索引列表 (从1开始)。
+    从文件夹加载图像，并根据文件名中的 11 位十六进制编码解析 LED 索引。
+    新格式: ..._expXXX_gainXXX_00000000001_W.tif
     """
-    filepaths = glob.glob(f"{folder_path}/{file_pattern}")
+    # 使用 os.path.join 提高兼容性
+    search_path = os.path.join(folder_path, file_pattern)
+    filepaths = glob.glob(search_path)
+    
     if not filepaths:
         raise FileNotFoundError(f"No images found in {folder_path} with pattern {file_pattern}")
 
     capture_data = []
     
-    # 正则表达式，用于从文件名中提取最后的二进制串
-    # 它会匹配一个下划线后跟着一串0和1，直到.tif结尾
-    pattern = re.compile(r'_([01]+)\.tif$')
+    # 修改后的正则表达式：匹配 11 位十六进制 + _W
+    # 示例: ..._00000000001_W.tif
+    pattern = re.compile(r'_([0-9a-fA-F]{11})_[A-Z]\.tif$')
 
     for fpath in filepaths:
-        match = pattern.search(fpath)
+        fname = os.path.basename(fpath)
+        match = pattern.search(fname)
         if not match:
-            print(f"Warning: Could not parse LED index from filename: {fpath}")
+            # 如果不匹配新格式，尝试匹配旧格式以便兼容（可选）
             continue
 
-        binary_str = match.group(1)
+        hex_str = match.group(1)
         
-        # 查找 '1' 的位置。find() 返回第一个匹配项的索引 (从0开始)
-        # 我们+1使其与你的LED索引(从1开始)匹配
         try:
-            # 确保字符串中只有一个 '1'
-            if binary_str.count('1') != 1:
-                print(f"Warning: Filename has multiple or zero '1's, skipping: {fpath}")
-                continue
+            # 使用新逻辑解码索引
+            led_index = decode_hex_to_led_index(hex_str)
             
-            led_index = binary_str.find('1') + 1
+            if led_index <= 0:
+                print(f"Warning: No '1' found in binary for file: {fname}")
+                continue
             
             with Image.open(fpath) as img:
                 img_np = np.array(img.convert('L'), dtype=np.float32)
@@ -70,12 +80,12 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
             print(f"Error processing file {fpath}: {e}")
 
     if not capture_data:
-        raise ValueError("No valid captures could be loaded. Check filenames and patterns.")
+        raise ValueError("No valid captures could be loaded. Check filenames (must contain 11-char hex).")
 
-    # 根据解析出的LED索引对数据进行排序
+    # 根据解析出的 LED 索引对数据进行排序
     capture_data.sort(key=lambda x: x['index'])
 
-    # 将排序后的数据分离成张量和索引列表
+    # 分离张量和索引
     led_indices = [item['index'] for item in capture_data]
     captures_list = [item['tensor'] for item in capture_data]
     
@@ -187,14 +197,11 @@ def visualize_kspace_and_captures(
                 ax.plot([center_x - 5, center_x + 5], [center_y - 5, center_y + 5], color='red', linewidth=2)
                 ax.plot([center_x - 5, center_x + 5], [center_y + 5, center_y - 5], color='red', linewidth=2)
             else:
-
-
                 # 计算箭头向量。k-vector代表光的传播方向，
                 # 这里我们画一个从中心指向外的箭头来表示它。
                 # 乘以 arrow_scale 来控制箭头的视觉长度。
-                # 注意：图像坐标系中，y轴通常是向下的，所以ky可能需要反转
                 arrow_dx = kx * arrow_scale
-                arrow_dy = ky * arrow_scale # 如果y轴方向相反，这里用 -ky
+                arrow_dy = ky * arrow_scale 
 
                 # 在图像中心绘制一个箭头
                 # ax.arrow(x_start, y_start, dx, dy, ...)
