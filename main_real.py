@@ -16,6 +16,7 @@ from utils import (
     visualize_kspace_and_captures
 )
 
+
 # --- 1. 用户配置 (User Configuration) ---
 # 请根据你的实际实验装置和数据填写此部分！
 # ----------------------------------------------------
@@ -81,8 +82,8 @@ all_ky = all_ky.to(pytorch_device)
 # 注意：我们的 led_indices 是从1开始的，所以需要减1来作为张量索引
 indices_for_slicing = torch.tensor(loaded_led_indices, dtype=torch.long) - 1
 
-kx_estimated = all_kx[indices_for_slicing]
-ky_estimated = all_ky[indices_for_slicing]
+kx_estimated = -all_kx[indices_for_slicing]
+ky_estimated = -all_ky[indices_for_slicing]
 
 print(f"\nSelected {len(kx_estimated)} k-vectors corresponding to loaded images.")
 
@@ -91,7 +92,7 @@ pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) * recon_pixel_size
 print(f"Calculated initial pupil radius: {pupil_radius_pixels:.1f} pixels")
 pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil_radius_pixels))
 
-# ==================== 新的可视化调用 ====================
+# ==================== 角度可视化调用 ====================
 # 在开始重建前，调用验证函数
 visualize_kspace_and_captures(
     captures=captures,

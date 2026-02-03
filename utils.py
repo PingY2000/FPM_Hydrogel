@@ -177,28 +177,40 @@ def visualize_kspace_and_captures(
             # 获取当前k-vector
             kx = kx_normalized[i].item()
             ky = ky_normalized[i].item()
+            k_norm = np.sqrt(kx**2 + ky**2)
 
-            # 计算箭头向量。k-vector代表光的传播方向，
-            # 这里我们画一个从中心指向外的箭头来表示它。
-            # 乘以 arrow_scale 来控制箭头的视觉长度。
-            # 注意：图像坐标系中，y轴通常是向下的，所以ky可能需要反转
-            arrow_dx = kx * arrow_scale
-            arrow_dy = ky * arrow_scale # 如果y轴方向相反，这里用 -ky
+            if k_norm < 1e-5:  # 判断是否为零向量（考虑浮点误差）
+                # 绘制 ⊗ 符号：用一个圆圈 + 叉线
+                circle = Circle((center_x, center_y), radius=8, fill=False, color='red', linewidth=2)
+                ax.add_patch(circle)
+                # 画叉（两条对角线）
+                ax.plot([center_x - 5, center_x + 5], [center_y - 5, center_y + 5], color='red', linewidth=2)
+                ax.plot([center_x - 5, center_x + 5], [center_y + 5, center_y - 5], color='red', linewidth=2)
+            else:
 
-            # 在图像中心绘制一个箭头
-            # ax.arrow(x_start, y_start, dx, dy, ...)
-            ax.arrow(
-                center_x, 
-                center_y, 
-                arrow_dx, 
-                arrow_dy,
-                head_width=max(1, 0.05 * arrow_scale * np.sqrt(kx**2 + ky**2)), # 箭头头部大小
-                head_length=max(1.5, 0.08 * arrow_scale * np.sqrt(kx**2 + ky**2)),
-                fc='red', # 箭头填充颜色
-                ec='red', # 箭头边框颜色
-                linewidth=max(0.5, 0.01 * arrow_scale * np.sqrt(kx**2 + ky**2))
-            )
-            
+
+                # 计算箭头向量。k-vector代表光的传播方向，
+                # 这里我们画一个从中心指向外的箭头来表示它。
+                # 乘以 arrow_scale 来控制箭头的视觉长度。
+                # 注意：图像坐标系中，y轴通常是向下的，所以ky可能需要反转
+                arrow_dx = kx * arrow_scale
+                arrow_dy = ky * arrow_scale # 如果y轴方向相反，这里用 -ky
+
+                # 在图像中心绘制一个箭头
+                # ax.arrow(x_start, y_start, dx, dy, ...)
+                ax.arrow(
+                    center_x-arrow_dx, 
+                    center_y-arrow_dy, 
+                    arrow_dx, 
+                    arrow_dy,
+                    head_width=9.0,
+                    head_length=12.0,
+                    fc='red', # 箭头填充颜色
+                    ec='red', # 箭头边框颜色
+                    linewidth=2.0,
+                    zorder=10
+                )
+                
             ax.set_title(f"Idx {i+1}", fontsize=8)
 
         ax.axis('off')
