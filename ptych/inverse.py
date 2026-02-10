@@ -5,6 +5,7 @@ import torch
 from tqdm import tqdm
 from jaxtyping import Float, Complex
 import os
+import numpy as np
 
 def solve_inverse(
     captures: Float[torch.Tensor, "B n n"], # [B, n, n] float on (0, 1)
@@ -16,6 +17,9 @@ def solve_inverse(
     learn_k_vectors: bool = False,
     epochs: int = 500,
     vis_interval: int = 0,
+    # --- New Parameters for Early Stopping ---
+    patience: int | None = None, # If set (e.g., 20), enables automatic stopping
+    min_delta: float = 1e-5      # Minimum loss improvement required
 ) -> tuple[Complex[torch.Tensor, "N N"], Complex[torch.Tensor, "N N"], dict[str, list[float]]]:
 
     #check_range(captures, 0, 1, "captures")
@@ -70,7 +74,12 @@ def solve_inverse(
         'lr': []
     }
 
-    
+    # --- Setup for Early Stopping ---
+    best_loss = float('inf')
+    patience_counter = 0
+    stop_early = False
+
+
     if vis_interval:
         # --- 准备实时显示画布 ---
         # --- 1. 初始化和准备保存路径 ---
@@ -91,7 +100,8 @@ def solve_inverse(
 
     
     # Training loop
-    for _ in tqdm(range(epochs), desc="Solving"):
+    loop = tqdm(range(epochs), desc="Solving")
+    for _ in loop:
         # Batched forward pass
         predicted_intensities = forward_model(object, pupil, kx_batch, ky_batch, downsample_factor)  # [B, H, W]
 
@@ -105,8 +115,23 @@ def solve_inverse(
         scheduler.step()
 
         # Record loss for this epoch
-        metrics['loss'].append(total_loss.item())
+        current_loss = total_loss.item()
+        metrics['loss'].append(current_loss)
         metrics['lr'].append(scheduler.get_last_lr()[0])
+
+        # --- Early Stopping Logic ---
+        if patience is not None:
+            if current_loss < (best_loss - min_delta):
+                best_loss = current_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            
+                loop.set_postfix(patience=f"{patience_counter}/{patience}", loss=f"{current_loss:.4f}")
+                
+                if patience_counter >= patience:
+                    #loop.write(f"\n[Stopping Early] Epoch {_}: No improvement for {patience} epochs. Best loss: {best_loss:.6f}")
+                    stop_early = True
 
         if vis_interval:
             # --- 3. 记录图片到网格 ---
@@ -130,6 +155,9 @@ def solve_inverse(
 
                     snapshot_count += 1
                     
+        if stop_early:
+            break
+
     if vis_interval:
         # --- 4. 保存最终的高密度大图 ---
         save_path = "output/iteration_process_dense.png"

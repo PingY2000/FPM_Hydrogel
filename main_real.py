@@ -114,6 +114,8 @@ object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
 
 # --- 5. 运行FPM重建 ---
+# 配置自动停止参数
+USE_AUTO_STOP = True # 开关
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
 reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
@@ -124,14 +126,25 @@ reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
     ky_batch=ky_estimated,
     learn_pupil=True,       # 必须开启以校正像差
     learn_k_vectors=False,   # 强烈推荐开启以修正k-vector误差
-    epochs=100,
+    # 如果启用自动停止，设置 patience (例如 20)。如果是 False，传入 None
+    patience=20 if USE_AUTO_STOP else None, 
+    # 最大的 Epochs 仍然需要设置作为上限
+    epochs=1000 if USE_AUTO_STOP else 500,
+    min_delta = 1e-2  
     #vis_interval = 10
 )
 print("Reconstruction finished.")
 
 
-# --- 6. 可视化结果 ---
+# --- 6. 可视化结果 & 保存结果 ---
 # ----------------------------------------------------
+
+# --- NEW: Save Metrics to JSON ---
+metrics_file_path = "output/metrics.json"
+print(f"Saving metrics to {metrics_file_path}...")
+with open(metrics_file_path, 'w') as f:
+    json.dump(metrics, f, indent=4)
+# ---------------------------------
 
 # A. 可视化损失曲线
 plt.figure(figsize=(10, 5))
