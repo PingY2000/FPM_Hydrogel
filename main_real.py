@@ -31,7 +31,7 @@ with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
 
 # A. 从 JSON 中读取系统物理参数
 NA_OBJECTIVE = config_data.get('NA_OBJECTIVE', 0.5)          # 物镜 NA
-WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 532)        # LED 波长 (nm)
+WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 465)        # LED 波长 (nm)
 MAGNIFICATION = config_data.get('MAGNIFICATION', 10.0)       # 物镜放大倍率
 CAMERA_PIXEL_SIZE_UM = config_data.get('CAMERA_PIXEL_SIZE_UM', 3.45) # 相机像素尺寸 (um)
 
@@ -42,12 +42,8 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 你存放真实图像的文件夹
 LED_POSITIONS_FILE = "led_positions.csv" # 你的LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 1       # 你的 captures 是否被下采样了？如果是256x256，可能不需要再下采样，设为1
-                            # 如果你的 forward_model 内部有下采样，要匹配起来
+DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
-# C. 重建超参数
-EPOCHS = 100
-LEARNING_RATE = 0.1
 
 # --- 2. 初始化和设备设置 ---
 # ----------------------------------------------------
@@ -128,14 +124,14 @@ reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
     ky_batch=ky_estimated,
     learn_pupil=True,       # 必须开启以校正像差
     learn_k_vectors=False,   # 强烈推荐开启以修正k-vector误差
-    epochs=500
+    epochs=100,
+    #vis_interval = 10
 )
 print("Reconstruction finished.")
 
 
 # --- 6. 可视化结果 ---
 # ----------------------------------------------------
-#print("Visualizing results...")
 
 # A. 可视化损失曲线
 plt.figure(figsize=(10, 5))
@@ -162,7 +158,14 @@ fig.colorbar(im2, ax=axes[1])
 plt.suptitle("Final Reconstruction", fontsize=16)
 plt.savefig("output/final_reconstruction.png")
 
-# C. 可视化学习到的光瞳 (非常重要!)
+# C. 保存最终无损/纯净图
+final_amp = torch.abs(reconstructed_object).cpu().detach().numpy()
+final_phs = torch.angle(reconstructed_object).cpu().detach().numpy()
+
+plt.imsave("output/final_amplitude_only.png", final_amp, cmap='gray')
+plt.imsave("output/final_phase_only.png", final_phs, cmap='viridis')
+
+# D. 可视化学习到的光瞳 
 learned_pupil_amp = torch.abs(reconstructed_pupil)
 learned_pupil_phase = torch.angle(reconstructed_pupil)
 
@@ -179,5 +182,7 @@ plt.suptitle("Learned Pupil Function", fontsize=16)
 plt.savefig("output/learned_pupil.png")
 
 print("\nAll plots saved to 'output' folder.")
+
+#print("Visualizing results...")
 #plt.show() # 如果你想在运行时弹出所有窗口
 

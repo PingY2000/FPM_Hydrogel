@@ -15,7 +15,7 @@ def solve_inverse(
     learn_pupil: bool = True,
     learn_k_vectors: bool = False,
     epochs: int = 500,
-    vis_interval: int = 5,
+    vis_interval: int = 0,
 ) -> tuple[Complex[torch.Tensor, "N N"], Complex[torch.Tensor, "N N"], dict[str, list[float]]]:
 
     #check_range(captures, 0, 1, "captures")
@@ -70,23 +70,26 @@ def solve_inverse(
         'lr': []
     }
 
-    # --- 准备实时显示画布 ---
-    # --- 1. 初始化和准备保存路径 ---
-    os.makedirs("output", exist_ok=True)
     
-    # 计算需要展示的快照数量 (包括最后一帧)
-    snapshot_indices = list(range(0, epochs, vis_interval))
-    if (epochs - 1) not in snapshot_indices:
-        snapshot_indices.append(epochs - 1)
+    if vis_interval:
+        # --- 准备实时显示画布 ---
+        # --- 1. 初始化和准备保存路径 ---
+        os.makedirs("output", exist_ok=True)
+        # 计算需要展示的快照数量 (包括最后一帧)
+        snapshot_indices = list(range(0, epochs, vis_interval))
+        if (epochs - 1) not in snapshot_indices:
+            snapshot_indices.append(epochs - 1)
+        
+        num_snapshots = len(snapshot_indices)
+        
+        # 创建大图：每一行代表一次采样，列为 [幅值, 相位]
+        # 增加 figsize 以确保高密度下依然清晰
+        fig, axes = plt.subplots(num_snapshots, 2, figsize=(10, 4 * num_snapshots))
+        plt.subplots_adjust(hspace=0.3) 
+        
+        snapshot_count = 0
+
     
-    num_snapshots = len(snapshot_indices)
-    
-    # 创建大图：每一行代表一次采样，列为 [幅值, 相位]
-    # 增加 figsize 以确保高密度下依然清晰
-    fig, axes = plt.subplots(num_snapshots, 2, figsize=(10, 4 * num_snapshots))
-    plt.subplots_adjust(hspace=0.3) 
-    
-    snapshot_count = 0
     # Training loop
     for _ in tqdm(range(epochs), desc="Solving"):
         # Batched forward pass
@@ -105,32 +108,34 @@ def solve_inverse(
         metrics['loss'].append(total_loss.item())
         metrics['lr'].append(scheduler.get_last_lr()[0])
 
-        # --- 3. 记录图片到网格 ---
-        if _ in snapshot_indices:
-            with torch.no_grad():
-                obj_np = object.detach().cpu()
-                amp = torch.abs(obj_np).numpy()
-                phase = torch.angle(obj_np).numpy()
+        if vis_interval:
+            # --- 3. 记录图片到网格 ---
+            if _ in snapshot_indices:
+                with torch.no_grad():
+                    obj_np = object.detach().cpu()
+                    amp = torch.abs(obj_np).numpy()
+                    phase = torch.angle(obj_np).numpy()
 
-                # 绘制到对应的行
-                ax_amp = axes[snapshot_count, 0]
-                ax_phase = axes[snapshot_count, 1]
+                    # 绘制到对应的行
+                    ax_amp = axes[snapshot_count, 0]
+                    ax_phase = axes[snapshot_count, 1]
 
-                ax_amp.imshow(amp, cmap='gray')
-                ax_amp.set_title(f"Epoch {_} | Amp", fontsize=10)
-                ax_amp.axis('off')
+                    ax_amp.imshow(amp, cmap='gray')
+                    ax_amp.set_title(f"Epoch {_} | Amp", fontsize=10)
+                    ax_amp.axis('off')
 
-                ax_phase.imshow(phase, cmap='viridis')
-                ax_phase.set_title(f"Epoch {_} | Phase", fontsize=10)
-                ax_phase.axis('off')
+                    ax_phase.imshow(phase, cmap='viridis')
+                    ax_phase.set_title(f"Epoch {_} | Phase", fontsize=10)
+                    ax_phase.axis('off')
 
-                snapshot_count += 1
-
-    # --- 4. 保存最终的高密度大图 ---
-    save_path = "output/iteration_process_dense.png"
-    plt.savefig(save_path, bbox_inches='tight', dpi=150)
-    plt.close(fig) # 释放内存，不显示窗口
-    
-    print(f"\nIteration progress saved to: {save_path}")
+                    snapshot_count += 1
+                    
+    if vis_interval:
+        # --- 4. 保存最终的高密度大图 ---
+        save_path = "output/iteration_process_dense.png"
+        plt.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close(fig) # 释放内存，不显示窗口
+        
+        print(f"\nIteration progress saved to: {save_path}")
 
     return object.detach(), pupil.detach(), metrics
