@@ -7,7 +7,7 @@ import ptych
 import os
 import json
 
-from ptych import solve_inverse
+from ptych import solve_inverse, analysis
 from utils import (
     get_default_device,
     load_real_captures,
@@ -20,12 +20,11 @@ from utils import (
 # --- 1. 用户配置 (User Configuration) ---
 # ----------------------------------------------------
 
-# 定义配置文件路径
+# 定义测试集配置文件路径
 CONFIG_JSON_PATH = r"D:\FPM_Dataset\OnTest\param.json"
 
 if not os.path.exists(CONFIG_JSON_PATH):
     raise FileNotFoundError(f"找不到配置文件: {CONFIG_JSON_PATH}")
-
 with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
     config_data = json.load(f)
 
@@ -39,27 +38,33 @@ CAMERA_PIXEL_SIZE_UM = config_data.get('CAMERA_PIXEL_SIZE_UM', 3.45) # 相机像
 print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x\nAMERA_PIXEL_SIZE:{CAMERA_PIXEL_SIZE_UM}\n")
 
 # B. 数据和重建参数
-CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 你存放真实图像的文件夹
-LED_POSITIONS_FILE = "led_positions.csv" # 你的LED位置文件
+CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
+LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
+LEARN_PUPIL = True # 校正像差
+LEARN_K_VECTORS = False # 修正k-vector误差
+EPOCHS = 300 # Epochs 上限
+USE_AUTO_STOP = False # 开关
+PATIENCE = 20
+MIN_E_DELTA = 1e-2
+VIS_INTERVAL = 0 # 迭代过程图片展示间隔
 
-# --- 2. 初始化和设备设置 ---
+
+
+
+# --- 2. 设备设置 ---
 # ----------------------------------------------------
 pytorch_device = get_default_device()
 torch.set_default_device(pytorch_device)
 print(f"Running on device: {pytorch_device}")
 
 
-# --- 3. 加载并预处理真实数据 ---
+# --- 3. 加载并预处理原始图片 ---
 # ----------------------------------------------------
-# load_real_captures 现在返回两个值
 captures, loaded_led_indices = load_real_captures(CAPTURES_PATH, file_pattern="*.tif")
-
 captures = captures.to(pytorch_device)
-
-# 预处理步骤保持不变
 captures = captures / captures.mean(dim=(-1, -2), keepdim=True)
 
 
@@ -92,13 +97,6 @@ indices_for_slicing = torch.tensor(loaded_led_indices, dtype=torch.long) - 1
 kx_estimated = -all_kx[indices_for_slicing]
 ky_estimated = -all_ky[indices_for_slicing]
 
-print(f"\nSelected {len(kx_estimated)} k-vectors corresponding to loaded images.")
-
-# C. 创建光瞳初始猜测
-pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) * recon_pixel_size_m * output_size
-print(f"Calculated initial pupil radius: {pupil_radius_pixels:.1f} pixels")
-pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil_radius_pixels))
-
 # ==================== 角度可视化调用 ====================
 # 在开始重建前，调用验证函数
 visualize_kspace_and_captures(
@@ -109,13 +107,19 @@ visualize_kspace_and_captures(
 )
 # ========================================================
 
+print(f"\nSelected {len(kx_estimated)} k-vectors corresponding to loaded images.")
+
+# C. 创建光瞳初始猜测
+pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) * recon_pixel_size_m * output_size
+print(f"Calculated initial pupil radius: {pupil_radius_pixels:.1f} pixels")
+pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil_radius_pixels))
+
+
 # D. 创建物体初始猜测
 object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
 
 # --- 5. 运行FPM重建 ---
-# 配置自动停止参数
-USE_AUTO_STOP = False # 开关
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
 reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
@@ -124,14 +128,12 @@ reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
     pupil=pupil_guess,
     kx_batch=kx_estimated,
     ky_batch=ky_estimated,
-    learn_pupil=True,       # 校正像差
-    learn_k_vectors=False,   # 修正k-vector误差
-    # 如果启用自动停止，设置 patience (例如 20)。如果是 False，传入 None
-    patience=20 if USE_AUTO_STOP else None, 
-    min_delta = 1e-2 ,
-    epochs=500, # Epochs 上限
-    
-    vis_interval = 0 # 迭代过程图片展示间隔
+    learn_pupil=LEARN_PUPIL,       
+    learn_k_vectors=LEARN_K_VECTORS,   
+    patience=PATIENCE if USE_AUTO_STOP else None, 
+    min_delta = MIN_E_DELTA,
+    epochs=EPOCHS, 
+    vis_interval = VIS_INTERVAL 
 )
 print("Reconstruction finished.")
 
@@ -139,19 +141,18 @@ print("Reconstruction finished.")
 # --- 6. 可视化结果 & 保存结果 ---
 # ----------------------------------------------------
 
-# --- NEW: Save Metrics to JSON ---
+# 保存metrics数据
 metrics_file_path = "output/metrics.json"
 print(f"Saving metrics to {metrics_file_path}...")
 with open(metrics_file_path, 'w') as f:
     json.dump(metrics, f, indent=4)
-# ---------------------------------
 
 # A. 可视化损失曲线
 plt.figure(figsize=(10, 5))
-plt.plot(metrics['loss'])
-plt.title("Loss Curve")
+plt.plot(metrics)
+plt.title("Curve")
 plt.xlabel("Epoch")
-plt.ylabel("L1 Loss")
+#plt.ylabel("L1 Loss")
 plt.grid(True)
 plt.savefig("output/real_data_loss_curve.png")
 
