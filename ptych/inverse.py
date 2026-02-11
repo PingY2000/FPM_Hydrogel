@@ -154,7 +154,7 @@ def solve_inverse(
                     ax_phase.axis('off')
 
                     snapshot_count += 1
-                    
+
         if stop_early:
             break
 

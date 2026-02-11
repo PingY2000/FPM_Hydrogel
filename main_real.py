@@ -115,7 +115,7 @@ object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
 # --- 5. 运行FPM重建 ---
 # 配置自动停止参数
-USE_AUTO_STOP = True # 开关
+USE_AUTO_STOP = False # 开关
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
 reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
@@ -124,14 +124,14 @@ reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
     pupil=pupil_guess,
     kx_batch=kx_estimated,
     ky_batch=ky_estimated,
-    learn_pupil=True,       # 必须开启以校正像差
-    learn_k_vectors=False,   # 强烈推荐开启以修正k-vector误差
+    learn_pupil=True,       # 校正像差
+    learn_k_vectors=False,   # 修正k-vector误差
     # 如果启用自动停止，设置 patience (例如 20)。如果是 False，传入 None
     patience=20 if USE_AUTO_STOP else None, 
-    # 最大的 Epochs 仍然需要设置作为上限
-    epochs=1000 if USE_AUTO_STOP else 500,
-    min_delta = 1e-2  
-    #vis_interval = 10
+    min_delta = 1e-2 ,
+    epochs=500, # Epochs 上限
+    
+    vis_interval = 0 # 迭代过程图片展示间隔
 )
 print("Reconstruction finished.")
 
