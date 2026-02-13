@@ -93,8 +93,8 @@ def solve_inverse(
         
         # 创建大图：每一行代表一次采样，列为 [幅值, 相位]
         # 增加 figsize 以确保高密度下依然清晰
-        fig, axes = plt.subplots(num_snapshots, 2, figsize=(10, 4 * num_snapshots))
-        plt.subplots_adjust(hspace=0.3) 
+        fig, axes = plt.subplots(num_snapshots, 4, figsize=(16, 4 * num_snapshots)) # 增加宽度
+        plt.subplots_adjust(hspace=0.3, wspace=0.2) 
         
         snapshot_count = 0
 
@@ -134,24 +134,38 @@ def solve_inverse(
                     stop_early = True
 
         if vis_interval:
-            # --- 3. 记录图片到网格 ---
             if _ in snapshot_indices:
                 with torch.no_grad():
+                    # --- 获取 Object 数据 ---
                     obj_np = object.detach().cpu()
-                    amp = torch.abs(obj_np).numpy()
-                    phase = torch.angle(obj_np).numpy()
+                    obj_amp = torch.abs(obj_np).numpy()
+                    obj_phase = torch.angle(obj_np).numpy()
 
-                    # 绘制到对应的行
-                    ax_amp = axes[snapshot_count, 0]
-                    ax_phase = axes[snapshot_count, 1]
+                    # --- 获取 Pupil 数据 ---
+                    pup_np = pupil.detach().cpu()
+                    pup_amp = torch.abs(pup_np).numpy()
+                    pup_phase = torch.angle(pup_np).numpy()
 
-                    ax_amp.imshow(amp, cmap='gray')
-                    ax_amp.set_title(f"Epoch {_} | Amp", fontsize=10)
-                    ax_amp.axis('off')
+                    # --- 绘制到对应的列 ---
+                    # 第一列：Object 幅值
+                    axes[snapshot_count, 0].imshow(obj_amp, cmap='gray')
+                    axes[snapshot_count, 0].set_title(f"Ep {_} | Obj Amp")
+                    
+                    # 第二列：Object 相位
+                    axes[snapshot_count, 1].imshow(obj_phase, cmap='viridis')
+                    axes[snapshot_count, 1].set_title(f"Ep {_} | Obj Phase")
+                    
+                    # 第三列：Pupil 幅值
+                    axes[snapshot_count, 2].imshow(pup_amp, cmap='gray')
+                    axes[snapshot_count, 2].set_title(f"Ep {_} | Pup Amp")
+                    
+                    # 第四列：Pupil 相位
+                    axes[snapshot_count, 3].imshow(pup_phase, cmap='magma') # 使用不同色阶区分
+                    axes[snapshot_count, 3].set_title(f"Ep {_} | Pup Phase")
 
-                    ax_phase.imshow(phase, cmap='viridis')
-                    ax_phase.set_title(f"Epoch {_} | Phase", fontsize=10)
-                    ax_phase.axis('off')
+                    # 统一关闭坐标轴
+                    for col in range(4):
+                        axes[snapshot_count, col].axis('off')
 
                     snapshot_count += 1
 

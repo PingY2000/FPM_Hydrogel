@@ -44,12 +44,12 @@ CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
-LEARN_K_VECTORS = False # 修正k-vector误差
-EPOCHS = 300 # Epochs 上限
+LEARN_K_VECTORS = True # 修正k-vector误差
+EPOCHS = 500 # Epochs 上限
 USE_AUTO_STOP = False # 开关
 PATIENCE = 20
 MIN_E_DELTA = 1e-2
-VIS_INTERVAL = 0 # 迭代过程图片展示间隔
+VIS_INTERVAL = 10 # 迭代过程图片展示间隔
 
 
 
@@ -147,14 +147,18 @@ print(f"Saving metrics to {metrics_file_path}...")
 with open(metrics_file_path, 'w') as f:
     json.dump(metrics, f, indent=4)
 
-# A. 可视化损失曲线
+# A. 可视化所有曲线
 plt.figure(figsize=(10, 5))
-plt.plot(metrics)
-plt.title("Curve")
-plt.xlabel("Epoch")
-#plt.ylabel("L1 Loss")
+
+for key, values in metrics.items():
+    plt.plot(values, label=key)
+
+plt.title("Training Metrics")
+plt.xlabel("Iteration")
+plt.ylabel("Value")
+plt.legend()
 plt.grid(True)
-plt.savefig("output/real_data_loss_curve.png")
+plt.savefig("output/real_data_metrics_curve.png")
 
 # B. 可视化重建的物体
 final_amplitude = torch.abs(reconstructed_object)
