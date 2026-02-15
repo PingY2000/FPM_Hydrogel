@@ -1,3 +1,4 @@
+# ptych\inverse.py
 from ptych.forward import forward_model
 import matplotlib.pyplot as plt
 #from ptych.utils import check_range
@@ -20,7 +21,11 @@ def solve_inverse(
     # --- New Parameters for Early Stopping ---
     patience: int | None = None, # If set (e.g., 20), enables automatic stopping
     min_delta: float = 1e-5      # Minimum loss improvement required
-) -> tuple[Complex[torch.Tensor, "N N"], Complex[torch.Tensor, "N N"], dict[str, list[float]]]:
+) -> tuple[Complex[torch.Tensor, "N N"],
+    Complex[torch.Tensor, "N N"],
+    Float[torch.Tensor, "B"],
+    Float[torch.Tensor, "B"],
+    dict[str, list[float]]]:
 
     #check_range(captures, 0, 1, "captures")
     #check_range(object, 0, 1, "object")
@@ -180,4 +185,17 @@ def solve_inverse(
         
         print(f"\nIteration progress saved to: {save_path}")
 
-    return object.detach(), pupil.detach(), metrics
+     # --- Detach learned parameters ---
+    final_object = object.detach()
+    final_pupil = pupil.detach()
+
+    if learn_k_vectors:
+        final_kx = kx_batch.detach()
+        final_ky = ky_batch.detach()
+    else:
+        # 若未学习，则返回原始值（保持接口一致）
+        final_kx = kx_batch
+        final_ky = ky_batch
+
+    return final_object, final_pupil, final_kx, final_ky, metrics
+

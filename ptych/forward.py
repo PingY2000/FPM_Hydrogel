@@ -1,3 +1,4 @@
+# ptych\forward.py
 """
 The FP forward model: O, P, {k_i}  →  {I_i}
 """

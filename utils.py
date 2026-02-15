@@ -117,8 +117,8 @@ def calculate_k_vectors_from_positions(
     x_center = X_m[center_idx_in_df]
     y_center = Y_m[center_idx_in_df]
     print(f"Centering k-vectors around LED #{center_led_index} at (X={x_center*1e3:.2f}, Y={y_center*1e3:.2f}) mm")
-    X_m_centered = X_m - x_center
-    Y_m_centered = Y_m - y_center
+    X_m_centered = X_m #- x_center
+    Y_m_centered = Y_m #- y_center
 
     # --- 计算 NA ---
     # 使用独立计算，这在大多数情况下足够准确
@@ -153,76 +153,69 @@ def visualize_kspace_and_captures(
     captures: torch.Tensor,
     kx_normalized: torch.Tensor,
     ky_normalized: torch.Tensor,
-    output_filename: str = "output/capture_orientation_validation.png",
-    arrow_scale: float = 500.0 
+    output_filename: str = "output/capture_orientation_validation.png"
 ):
-    """
-    可视化每个捕获的原始图像，并在其上用箭头指示计算出的k-vector方向。
-
-    Args:
-        captures (torch.Tensor): 低分辨率图像张量 [B, H, W]。
-        kx_normalized (torch.Tensor): 归一化的kx向量 [B]。
-        ky_normalized (torch.Tensor): 归一化的ky向量 [B]。
-        output_filename (str): 保存图像的文件名。
-        arrow_scale (float): 控制箭头长度的缩放因子，需要根据图像大小调整。
-    """
     print("Generating capture orientation validation plot...")
     
     num_captures = len(captures)
     grid_size = int(np.ceil(np.sqrt(num_captures)))
     fig, axes = plt.subplots(grid_size, grid_size, figsize=(grid_size * 2, grid_size * 2))
     
-    # 图像尺寸
+    # 自动计算缩放因子：
+    # 假设 k 向量的最大模长约为 0.5，我们希望最长的箭头占据图像半径的 80%
     h, w = captures.shape[-2:]
     center_x, center_y = w / 2, h / 2
+    max_arrow_len = min(h, w) * 0.4  # 图像短边的一半再乘以 0.8
+    
+    # 获取所有 k 向量的模长，用于归一化长度比例
+    k_norms = torch.sqrt(kx_normalized**2 + ky_normalized**2)
+    max_k = torch.max(k_norms).item() if torch.max(k_norms) > 0 else 1.0
+    # 这里的 scale 保证了物理意义上的比例：k 越大，箭头越长
+    auto_scale = max_arrow_len / max_k 
 
-    # 准备数据以便绘图
     captures_np = captures.cpu().numpy()
 
     for i, ax in enumerate(axes.flat):
         if i < num_captures:
-            # 显示原始捕获图像
             ax.imshow(captures_np[i], cmap='gray')
 
-            # 获取当前k-vector
             kx = kx_normalized[i].item()
             ky = ky_normalized[i].item()
-            k_norm = np.sqrt(kx**2 + ky**2)
+            kn = k_norms[i].item()
 
-            if k_norm < 1e-5:  # 判断是否为零向量（考虑浮点误差）
-                # 绘制 ⊗ 符号：用一个圆圈 + 叉线
-                circle = Circle((center_x, center_y), radius=8, fill=False, color='red', linewidth=2)
+            if kn < 1e-5:
+                # 绘制中心点标记 (零向量照明)
+                circle = Circle((center_x, center_y), radius=w*0.05, fill=False, color='cyan', linewidth=1.5)
                 ax.add_patch(circle)
-                # 画叉（两条对角线）
-                ax.plot([center_x - 5, center_x + 5], [center_y - 5, center_y + 5], color='red', linewidth=2)
-                ax.plot([center_x - 5, center_x + 5], [center_y + 5, center_y - 5], color='red', linewidth=2)
+                ax.plot([center_x - w*0.03, center_x + w*0.03], [center_y, center_y], color='cyan', linewidth=1)
+                ax.plot([center_x, center_x], [center_y - h*0.03, center_y + h*0.03], color='cyan', linewidth=1)
             else:
-                # 计算箭头向量。k-vector代表光的传播方向，
-                # 这里我们画一个从中心指向外的箭头来表示它。
-                # 乘以 arrow_scale 来控制箭头的视觉长度。
-                arrow_dx = kx * arrow_scale
-                arrow_dy = ky * arrow_scale 
+                # 计算位移向量：指向中心
+                dx = kx * auto_scale
+                dy = ky * auto_scale 
 
-                # 在图像中心绘制一个箭头
-                # ax.arrow(x_start, y_start, dx, dy, ...)
-                ax.arrow(
-                    center_x-arrow_dx, 
-                    center_y-arrow_dy, 
-                    arrow_dx*0.5, 
-                    arrow_dy*0.5,
-                    head_width=9.0,
-                    head_length=12.0,
-                    fc='red', # 箭头填充颜色
-                    ec='red', # 箭头边框颜色
-                    linewidth=2.0,
+                # 逻辑说明：
+                # 箭头的终点固定在中心 (center_x, center_y)
+                # 起点则根据 k 向量的反方向偏移得出
+                ax.annotate(
+                    '', 
+                    xy=(center_x, center_y),           # 箭头尖端位置 (中心)
+                    xytext=(center_x - dx, center_y - dy), # 箭头尾部位置
+                    arrowprops=dict(
+                        arrowstyle='->, head_width=0.3, head_length=0.5',
+                        color='red',
+                        lw=1.5,
+                        shrinkA=0, # 不在起点缩进
+                        shrinkB=0  # 不在终点缩进
+                    ),
                     zorder=10
                 )
                 
-            ax.set_title(f"Idx {i+1}", fontsize=8)
-
+            ax.set_title(f"Idx {i}\n$k:[{kx:.2f}, {ky:.2f}]$", fontsize=7)
         ax.axis('off')
 
-    plt.suptitle("Capture Orientation vs. Calculated k-vector", fontsize=16)
+    plt.suptitle("Illumination Directions: Red arrows point TO center", fontsize=16)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(output_filename)
+    plt.savefig(output_filename, dpi=150)
+    plt.close()
     print(f"Validation plot saved to {output_filename}")

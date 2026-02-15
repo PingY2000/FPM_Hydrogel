@@ -45,7 +45,7 @@ DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = True # 修正k-vector误差
-EPOCHS = 500 # Epochs 上限
+EPOCHS = 200 # Epochs 上限
 USE_AUTO_STOP = False # 开关
 PATIENCE = 20
 MIN_E_DELTA = 1e-2
@@ -102,8 +102,7 @@ ky_estimated = -all_ky[indices_for_slicing]
 visualize_kspace_and_captures(
     captures=captures,
     kx_normalized=kx_estimated,
-    ky_normalized=ky_estimated,
-    arrow_scale=500.0 
+    ky_normalized=ky_estimated
 )
 # ========================================================
 
@@ -122,7 +121,7 @@ object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 # --- 5. 运行FPM重建 ---
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
-reconstructed_object, reconstructed_pupil, metrics = solve_inverse(
+reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = solve_inverse(
     captures=captures,
     object=object_guess,
     pupil=pupil_guess,
@@ -146,6 +145,7 @@ metrics_file_path = "output/metrics.json"
 print(f"Saving metrics to {metrics_file_path}...")
 with open(metrics_file_path, 'w') as f:
     json.dump(metrics, f, indent=4)
+
 
 # A. 可视化所有曲线
 plt.figure(figsize=(10, 5))
@@ -198,6 +198,43 @@ fig.colorbar(im4, ax=axes[1])
 
 plt.suptitle("Learned Pupil Function", fontsize=16)
 plt.savefig("output/learned_pupil.png")
+
+# ==========================================================
+# E. 可视化输入与学习后的 k-vectors 对比
+# ==========================================================
+
+kx_input = kx_estimated.cpu().detach().numpy()
+ky_input = ky_estimated.cpu().detach().numpy()
+
+kx_out = learned_kx.cpu().detach().numpy()
+ky_out = learned_ky.cpu().detach().numpy()
+
+plt.figure(figsize=(8, 8))
+
+# 输入k向量
+plt.scatter(kx_input, ky_input, label="Initial k-vectors", marker='o')
+
+# 输出k向量
+plt.scatter(kx_out, ky_out, label="Learned k-vectors", marker='x')
+
+# 画误差箭头
+for i in range(len(kx_input)):
+    plt.arrow(
+        kx_input[i],
+        ky_input[i],
+        kx_out[i] - kx_input[i],
+        ky_out[i] - ky_input[i],
+        head_width=0.002,
+        length_includes_head=True
+    )
+
+plt.xlabel("kx (normalized)")
+plt.ylabel("ky (normalized)")
+plt.title("k-vector Calibration Result")
+plt.legend()
+plt.grid(True)
+plt.axis('equal')
+plt.savefig("output/k_vector_comparison.png")
 
 print("\nAll plots saved to 'output' folder.")
 
