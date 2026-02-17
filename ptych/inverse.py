@@ -7,6 +7,77 @@ from tqdm import tqdm
 from jaxtyping import Float, Complex
 import os
 import numpy as np
+import pandas as pd
+
+def compute_k_from_rigid_body(
+    led_coords_init: torch.Tensor, # [B, 3] (x, y, z) in meters
+    params: torch.Tensor,          # [4] (dx, dy, dz, theta)
+    wavelength: float,             # meters
+    recon_pixel_size: float        # meters
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    根据刚体变换参数实时计算 kx, ky
+    params: [shift_x, shift_y, shift_z, rotation_theta]
+    """
+    # 1. 提取参数
+    dx, dy, dz, theta = params[0], params[1], params[2], params[3]
+    
+    x_init = led_coords_init[:, 0]
+    y_init = led_coords_init[:, 1]
+    z_init = led_coords_init[:, 2] # 假设 z 是正值 (高度)
+
+    # 2. 应用旋转 (绕 Z 轴, 原点通常为光轴中心)
+    # 旋转矩阵: x' = x cos - y sin, y' = x sin + y cos
+    x_rot = x_init * torch.cos(theta) - y_init * torch.sin(theta)
+    y_rot = x_init * torch.sin(theta) + y_init * torch.cos(theta)
+    
+    # 3. 应用平移
+    x_final = x_rot + dx
+    y_final = y_rot + dy
+    z_final = z_init + dz # 高度变化会改变入射角
+    
+    # 4. 计算新的物理 k 向量 (NA = sin(theta))
+    # R = sqrt(x^2 + y^2 + z^2)
+    R = torch.sqrt(x_final**2 + y_final**2 + z_final**2)
+    
+    na_x = x_final / R
+    na_y = y_final / R
+    
+    # 5. 归一化到 [-0.5, 0.5] 空间 (cycles per pixel)
+    # k = sin(theta) / lambda * pixel_size
+    kx_new = (na_x / wavelength) * recon_pixel_size
+    ky_new = (na_y / wavelength) * recon_pixel_size
+    
+    return kx_new, ky_new
+
+def calculate_k_vectors_from_positions(
+    X_m: np.ndarray,
+    Y_m: np.ndarray,
+    Z_m: np.ndarray,
+    lambda_nm: float,
+    magnification: float,
+    camera_pixel_size_um: float,
+    recon_pixel_size_m: float,
+    center_led_index: int = 1,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """从LED物理位置CSV文件计算归一化的k-vectors。"""
+    lambda_m = lambda_nm * 1e-9
+    
+    # --- 计算 NA ---
+    # 使用独立计算，这在大多数情况下足够准确
+    na_x = np.sin(np.arctan(X_m / Z_m))
+    na_y = np.sin(np.arctan(Y_m / Z_m))
+
+    # --- 转换为归一化 k-vectors ---
+    # k_normalized 的单位是 "cycles per pixel"
+    # 它代表了由该NA在样品平面上，每个像素经历的相位周期数
+    kx_normalized = na_x / lambda_m * recon_pixel_size_m
+    ky_normalized = na_y / lambda_m * recon_pixel_size_m
+
+    print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
+    print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
+
+    return torch.from_numpy(kx_normalized).float(), torch.from_numpy(ky_normalized).float()
 
 def solve_inverse(
     captures: Float[torch.Tensor, "B n n"], # [B, n, n] float on (0, 1)
@@ -18,9 +89,6 @@ def solve_inverse(
     learn_k_vectors: bool = False,
     epochs: int = 500,
     vis_interval: int = 0,
-    # --- New Parameters for Early Stopping ---
-    patience: int | None = None, # If set (e.g., 20), enables automatic stopping
-    min_delta: float = 1e-5      # Minimum loss improvement required
 ) -> tuple[Complex[torch.Tensor, "N N"],
     Complex[torch.Tensor, "N N"],
     Float[torch.Tensor, "B"],
@@ -48,6 +116,7 @@ def solve_inverse(
     if learn_pupil:
         pupil = pupil.clone().detach().requires_grad_(True)
         learned_tensors.append({'params': pupil, 'lr': 0.1})
+
     if learn_k_vectors:
         kx_batch = kx_batch.clone().detach().requires_grad_(True)
         ky_batch = ky_batch.clone().detach().requires_grad_(True)
@@ -79,10 +148,7 @@ def solve_inverse(
         'lr': []
     }
 
-    # --- Setup for Early Stopping ---
-    best_loss = float('inf')
-    patience_counter = 0
-    stop_early = False
+
 
 
     if vis_interval:
@@ -124,19 +190,6 @@ def solve_inverse(
         metrics['loss'].append(current_loss)
         metrics['lr'].append(scheduler.get_last_lr()[0])
 
-        # --- Early Stopping Logic ---
-        if patience is not None:
-            if current_loss < (best_loss - min_delta):
-                best_loss = current_loss
-                patience_counter = 0
-            else:
-                patience_counter += 1
-            
-                loop.set_postfix(patience=f"{patience_counter}/{patience}", loss=f"{current_loss:.4f}")
-                
-                if patience_counter >= patience:
-                    #loop.write(f"\n[Stopping Early] Epoch {_}: No improvement for {patience} epochs. Best loss: {best_loss:.6f}")
-                    stop_early = True
 
         if vis_interval:
             if _ in snapshot_indices:
@@ -174,8 +227,7 @@ def solve_inverse(
 
                     snapshot_count += 1
 
-        if stop_early:
-            break
+
 
     if vis_interval:
         # --- 4. 保存最终的高密度大图 ---
@@ -185,7 +237,7 @@ def solve_inverse(
         
         print(f"\nIteration progress saved to: {save_path}")
 
-     # --- Detach learned parameters ---
+    # --- Detach learned parameters ---
     final_object = object.detach()
     final_pupil = pupil.detach()
 

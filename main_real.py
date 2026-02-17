@@ -6,12 +6,12 @@ import numpy as np
 import ptych
 import os
 import json
+import pandas as pd
 
-from ptych import solve_inverse, analysis
+from ptych import solve_inverse, analysis, calculate_k_vectors_from_positions
 from utils import (
     get_default_device,
     load_real_captures,
-    calculate_k_vectors_from_positions,
     create_circular_pupil,
     visualize_kspace_and_captures
 )
@@ -41,15 +41,12 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
 LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
+DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
-LEARN_K_VECTORS = True # 修正k-vector误差
+LEARN_K_VECTORS = False # 修正k-vector误差
 EPOCHS = 200 # Epochs 上限
-USE_AUTO_STOP = False # 开关
-PATIENCE = 20
-MIN_E_DELTA = 1e-2
-VIS_INTERVAL = 10 # 迭代过程图片展示间隔
+VIS_INTERVAL = 0 # 迭代过程图片展示间隔
 
 
 
@@ -78,8 +75,16 @@ print(f"Capture size: {capture_height}x{capture_width}, Output size: {output_siz
 # B. 计算 k-vectors 初始估计
 recon_pixel_size_m = (CAMERA_PIXEL_SIZE_UM * 1e-6 / MAGNIFICATION) * DOWNSAMPLE_FACTOR
 # 首先，计算出你的 .csv 文件中所有LED的k-vectors
+
+# --- 4. 计算K向量 ---
+df = pd.read_csv(LED_POSITIONS_FILE)
+X_m = df['X'].values * 1e-3
+Y_m = df['Y'].values * 1e-3
+Z_m = df['Z'].values * 1e-3
 all_kx, all_ky = calculate_k_vectors_from_positions(
-    LED_POSITIONS_FILE,
+    X_m,
+    Y_m,
+    Z_m,
     WAVELENGTH_NM,
     MAGNIFICATION,
     CAMERA_PIXEL_SIZE_UM,
@@ -94,8 +99,8 @@ all_ky = all_ky.to(pytorch_device)
 # 注意：我们的 led_indices 是从1开始的，所以需要减1来作为张量索引
 indices_for_slicing = torch.tensor(loaded_led_indices, dtype=torch.long) - 1
 
-kx_estimated = -all_kx[indices_for_slicing]
-ky_estimated = -all_ky[indices_for_slicing]
+kx_estimated = all_kx[indices_for_slicing]
+ky_estimated = all_ky[indices_for_slicing]
 
 # ==================== 角度可视化调用 ====================
 # 在开始重建前，调用验证函数
@@ -115,7 +120,7 @@ pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil
 
 
 # D. 创建物体初始猜测
-object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
+object_guess = 0.5 * torch.ones(int(output_size), int(output_size), dtype=torch.complex64)
 
 
 # --- 5. 运行FPM重建 ---
@@ -129,8 +134,6 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     ky_batch=ky_estimated,
     learn_pupil=LEARN_PUPIL,       
     learn_k_vectors=LEARN_K_VECTORS,   
-    patience=PATIENCE if USE_AUTO_STOP else None, 
-    min_delta = MIN_E_DELTA,
     epochs=EPOCHS, 
     vis_interval = VIS_INTERVAL 
 )

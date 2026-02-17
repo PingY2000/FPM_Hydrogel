@@ -96,45 +96,7 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
     
     return captures, led_indices
 
-def calculate_k_vectors_from_positions(
-    filepath: str,
-    lambda_nm: float,
-    magnification: float,
-    camera_pixel_size_um: float,
-    recon_pixel_size_m: float,
-    center_led_index: int = 1,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """从LED物理位置CSV文件计算归一化的k-vectors。"""
-    lambda_m = lambda_nm * 1e-9
-    
-    df = pd.read_csv(filepath)
-    X_m = df['X'].values * 1e-3
-    Y_m = df['Y'].values * 1e-3
-    Z_m = df['Z'].values * 1e-3
 
-    # --- 中心校准 ---
-    center_idx_in_df = center_led_index - 1 # DataFrame 索引从0开始
-    x_center = X_m[center_idx_in_df]
-    y_center = Y_m[center_idx_in_df]
-    print(f"Centering k-vectors around LED #{center_led_index} at (X={x_center*1e3:.2f}, Y={y_center*1e3:.2f}) mm")
-    X_m_centered = X_m #- x_center
-    Y_m_centered = Y_m #- y_center
-
-    # --- 计算 NA ---
-    # 使用独立计算，这在大多数情况下足够准确
-    na_x = np.sin(np.arctan(X_m_centered / Z_m))
-    na_y = np.sin(np.arctan(Y_m_centered / Z_m))
-
-    # --- 转换为归一化 k-vectors ---
-    # k_normalized 的单位是 "cycles per pixel"
-    # 它代表了由该NA在样品平面上，每个像素经历的相位周期数
-    kx_normalized = na_x / lambda_m * recon_pixel_size_m
-    ky_normalized = na_y / lambda_m * recon_pixel_size_m
-
-    print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
-    print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
-
-    return torch.from_numpy(kx_normalized).float(), torch.from_numpy(ky_normalized).float()
 
 def create_circular_pupil(shape: tuple[int, int], radius: int) -> torch.Tensor:
     """创建一个二元的圆形光瞳函数。"""
