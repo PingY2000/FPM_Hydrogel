@@ -37,8 +37,8 @@ def decode_hex_to_led_index(hex_str: str) -> int:
 
 def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[torch.Tensor, list[int]]:
     """
-    从文件夹加载图像，并根据文件名中的 11 位十六进制编码解析 LED 索引。
-    新格式: ..._expXXX_gainXXX_00000000001_W.tif
+    从文件夹加载图像，并解析曝光时间(exp)进行归一化，同时根据十六进制编码解析 LED 索引。
+    文件名示例: 0210_162538_exp300_gain100_00000000001_G.tif
     """
     # 使用 os.path.join 提高兼容性
     search_path = os.path.join(folder_path, file_pattern)
@@ -49,9 +49,9 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
 
     capture_data = []
     
-    # 修改后的正则表达式：匹配 11 位十六进制 + _W
-    # 示例: ..._00000000001_W.tif
-    pattern = re.compile(r'_([0-9a-fA-F]{11})_[A-Z]\.tif$')
+    # 修改后的正则表达式：
+    # 匹配 exp(\d+), gain(\d+), 以及 11位十六进制 ([0-9a-fA-F]{11})
+    pattern = re.compile(r'_exp(\d+)_gain(\d+)_([0-9a-fA-F]{11})_[A-Z]\.tif$')
 
     for fpath in filepaths:
         fname = os.path.basename(fpath)
@@ -60,18 +60,29 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
             # 如果不匹配新格式，尝试匹配旧格式以便兼容（可选）
             continue
 
-        hex_str = match.group(1)
+        # 提取参数
+        exp_val = float(match.group(1))   # 曝光时间
+        gain_val = float(match.group(2)) # 增益 (通常FPM主要校准exp，gain若是非线性的则较难直接除)
+        hex_str = match.group(3)
         
         try:
-            # 使用新逻辑解码索引
+            # 1. 解码 LED 索引
             led_index = decode_hex_to_led_index(hex_str)
+            if led_index <= 0: continue
             
-            if led_index <= 0:
-                print(f"Warning: No '1' found in binary for file: {fname}")
-                continue
-            
+            # 2. 读取图像
             with Image.open(fpath) as img:
                 img_np = np.array(img.convert('L'), dtype=np.float32)
+                
+                # --- 核心曝光校准 ---
+                # 将图像线性缩放到单位曝光时间下的亮度
+                # 这样 exp300 的暗场和 exp30 的明场就能在同一量纲下对比
+                if exp_val > 0:
+                    img_np = img_np / exp_val
+                else:
+                    print(f"Warning: Zero exposure time in {fname}")
+                # ------------------
+
                 capture_data.append({
                     'index': led_index,
                     'tensor': torch.from_numpy(img_np)
@@ -90,6 +101,9 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
     captures_list = [item['tensor'] for item in capture_data]
     
     captures = torch.stack(captures_list, dim=0)
+
+    global_scale = captures.mean() 
+    captures = captures / global_scale
 
     print(f"Successfully loaded and sorted {len(captures)} images.")
     print(f"Detected LED indices: {led_indices[:5]}...{led_indices[-5:]}")

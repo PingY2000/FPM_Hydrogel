@@ -44,9 +44,9 @@ CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
-LEARN_K_VECTORS = False # 修正k-vector误差
+LEARN_K_VECTORS = True # 修正k-vector误差
 EPOCHS = 200 # Epochs 上限
-VIS_INTERVAL = 0 # 迭代过程图片展示间隔
+VIS_INTERVAL = 5 # 迭代过程图片展示间隔
 
 
 
@@ -62,7 +62,7 @@ print(f"Running on device: {pytorch_device}")
 # ----------------------------------------------------
 captures, loaded_led_indices = load_real_captures(CAPTURES_PATH, file_pattern="*.tif")
 captures = captures.to(pytorch_device)
-captures = captures / captures.mean(dim=(-1, -2), keepdim=True)
+#captures = captures / captures.mean(dim=(-1, -2), keepdim=True)
 
 
 # --- 4. 计算和创建初始猜测 ---
@@ -78,13 +78,30 @@ recon_pixel_size_m = (CAMERA_PIXEL_SIZE_UM * 1e-6 / MAGNIFICATION) * DOWNSAMPLE_
 
 # --- 4. 计算K向量 ---
 df = pd.read_csv(LED_POSITIONS_FILE)
-X_m = df['X'].values * 1e-3
-Y_m = df['Y'].values * 1e-3
-Z_m = df['Z'].values * 1e-3
+# 必须转为 Tensor，形状 [B, 3]
+led_x = torch.tensor(df['X'].values * 1e-3, dtype=torch.float32) # mm -> m
+led_y = torch.tensor(df['Y'].values * 1e-3, dtype=torch.float32)
+led_z = torch.tensor(df['Z'].values * 1e-3, dtype=torch.float32)
+# 堆叠成 [N, 3]
+all_led_coords = torch.stack([led_x, led_y, led_z], dim=1).to(pytorch_device)
+
+# 接下来，根据加载图像得到的 led_indices，从 all_kx, all_ky 中筛选出我们需要的k-vectors
+# 注意：我们的 led_indices 是从1开始的，所以需要减1来作为张量索引
+indices_for_slicing = torch.tensor(loaded_led_indices, dtype=torch.long) - 1
+
+led_coords_batch = all_led_coords[indices_for_slicing]
+
+# 计算物理常数
+recon_pixel_size_val = (CAMERA_PIXEL_SIZE_UM * 1e-6 / MAGNIFICATION) * DOWNSAMPLE_FACTOR
+wavelength_val = WAVELENGTH_NM * 1e-9
+
+# B. 计算 k-vectors 初始估计
+
+recon_pixel_size_m = (CAMERA_PIXEL_SIZE_UM * 1e-6 / MAGNIFICATION) * DOWNSAMPLE_FACTOR
+
+# 首先，计算出你的 .csv 文件中所有LED的k-vectors
 all_kx, all_ky = calculate_k_vectors_from_positions(
-    X_m,
-    Y_m,
-    Z_m,
+    LED_POSITIONS_FILE,
     WAVELENGTH_NM,
     MAGNIFICATION,
     CAMERA_PIXEL_SIZE_UM,
@@ -99,8 +116,10 @@ all_ky = all_ky.to(pytorch_device)
 # 注意：我们的 led_indices 是从1开始的，所以需要减1来作为张量索引
 indices_for_slicing = torch.tensor(loaded_led_indices, dtype=torch.long) - 1
 
+
 kx_estimated = all_kx[indices_for_slicing]
 ky_estimated = all_ky[indices_for_slicing]
+
 
 # ==================== 角度可视化调用 ====================
 # 在开始重建前，调用验证函数
@@ -109,9 +128,7 @@ visualize_kspace_and_captures(
     kx_normalized=kx_estimated,
     ky_normalized=ky_estimated
 )
-# ========================================================
 
-print(f"\nSelected {len(kx_estimated)} k-vectors corresponding to loaded images.")
 
 # C. 创建光瞳初始猜测
 pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) * recon_pixel_size_m * output_size
@@ -130,12 +147,18 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     captures=captures,
     object=object_guess,
     pupil=pupil_guess,
-    kx_batch=kx_estimated,
-    ky_batch=ky_estimated,
+    # --- 整体位置误差迭代 ---
+    led_physics_coords=led_coords_batch, # 传入物理坐标 [B, 3]
+    wavelength=wavelength_val,
+    recon_pixel_size=recon_pixel_size_val,
+    # ----------------
+    kx_batch=kx_estimated, # 刚体模式下设为 None 也可以，或者传入初始值作为对比
+    ky_batch=ky_estimated, 
+    
     learn_pupil=LEARN_PUPIL,       
-    learn_k_vectors=LEARN_K_VECTORS,   
+    learn_k_vectors=LEARN_K_VECTORS, # 开启学习
     epochs=EPOCHS, 
-    vis_interval = VIS_INTERVAL 
+    vis_interval=VIS_INTERVAL
 )
 print("Reconstruction finished.")
 
@@ -202,42 +225,7 @@ fig.colorbar(im4, ax=axes[1])
 plt.suptitle("Learned Pupil Function", fontsize=16)
 plt.savefig("output/learned_pupil.png")
 
-# ==========================================================
-# E. 可视化输入与学习后的 k-vectors 对比
-# ==========================================================
 
-kx_input = kx_estimated.cpu().detach().numpy()
-ky_input = ky_estimated.cpu().detach().numpy()
-
-kx_out = learned_kx.cpu().detach().numpy()
-ky_out = learned_ky.cpu().detach().numpy()
-
-plt.figure(figsize=(8, 8))
-
-# 输入k向量
-plt.scatter(kx_input, ky_input, label="Initial k-vectors", marker='o')
-
-# 输出k向量
-plt.scatter(kx_out, ky_out, label="Learned k-vectors", marker='x')
-
-# 画误差箭头
-for i in range(len(kx_input)):
-    plt.arrow(
-        kx_input[i],
-        ky_input[i],
-        kx_out[i] - kx_input[i],
-        ky_out[i] - ky_input[i],
-        head_width=0.002,
-        length_includes_head=True
-    )
-
-plt.xlabel("kx (normalized)")
-plt.ylabel("ky (normalized)")
-plt.title("k-vector Calibration Result")
-plt.legend()
-plt.grid(True)
-plt.axis('equal')
-plt.savefig("output/k_vector_comparison.png")
 
 print("\nAll plots saved to 'output' folder.")
 

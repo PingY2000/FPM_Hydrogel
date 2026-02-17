@@ -51,22 +51,40 @@ def compute_k_from_rigid_body(
     return kx_new, ky_new
 
 def calculate_k_vectors_from_positions(
-    X_m: np.ndarray,
-    Y_m: np.ndarray,
-    Z_m: np.ndarray,
+    filepath: str,
     lambda_nm: float,
     magnification: float,
     camera_pixel_size_um: float,
     recon_pixel_size_m: float,
     center_led_index: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+
     """从LED物理位置CSV文件计算归一化的k-vectors。"""
-    lambda_m = lambda_nm * 1e-9
-    
+    lambda_m = lambda_nm * 1e-9 
+
+    df = pd.read_csv(filepath)
+    X_m = df['X'].values * 1e-3
+    Y_m = df['Y'].values * 1e-3
+    Z_m = df['Z'].values * 1e-3
+
+
+
+    # --- 中心校准 ---
+    center_idx_in_df = center_led_index - 1 # DataFrame 索引从0开始
+    x_center = X_m[center_idx_in_df]
+    y_center = Y_m[center_idx_in_df]
+    print(f"Centering k-vectors around LED #{center_led_index} at (X={x_center*1e3:.2f}, Y={y_center*1e3:.2f}) mm")
+    X_m_centered = X_m #- x_center
+    Y_m_centered = Y_m #- y_center
+
+
+
     # --- 计算 NA ---
     # 使用独立计算，这在大多数情况下足够准确
-    na_x = np.sin(np.arctan(X_m / Z_m))
-    na_y = np.sin(np.arctan(Y_m / Z_m))
+    na_x = np.sin(np.arctan(X_m_centered / Z_m))
+    na_y = np.sin(np.arctan(Y_m_centered / Z_m))
+
+
 
     # --- 转换为归一化 k-vectors ---
     # k_normalized 的单位是 "cycles per pixel"
@@ -80,20 +98,20 @@ def calculate_k_vectors_from_positions(
     return torch.from_numpy(kx_normalized).float(), torch.from_numpy(ky_normalized).float()
 
 def solve_inverse(
-    captures: Float[torch.Tensor, "B n n"], # [B, n, n] float on (0, 1)
-    object: Complex[torch.Tensor, "N N"], # [N, N] complex on (0, 1)
-    pupil: Complex[torch.Tensor, "N N"], # [N, N] complex on (0, 1)
-    kx_batch: Float[torch.Tensor, "B"], # [B] float on (-0.5, 0.5)
-    ky_batch: Float[torch.Tensor, "B"], # [B] float on (-0.5, 0.5)
+    captures: Float[torch.Tensor, "B n n"],
+    object: Complex[torch.Tensor, "N N"],
+    pupil: Complex[torch.Tensor, "N N"],
+    led_physics_coords: Float[torch.Tensor, "B 3"] | None = None, # [X, Y, Z] 物理坐标(米)
+    wavelength: float | None = None,       # 波长(米)
+    recon_pixel_size: float | None = None, # 重建像素尺寸(米)
+    kx_batch: Float[torch.Tensor, "B"] | None = None, 
+    ky_batch: Float[torch.Tensor, "B"] | None = None,
+    
     learn_pupil: bool = True,
-    learn_k_vectors: bool = False,
+    learn_k_vectors: bool = False, # 现在这个开关控制是否开启“刚体优化”
     epochs: int = 500,
     vis_interval: int = 0,
-) -> tuple[Complex[torch.Tensor, "N N"],
-    Complex[torch.Tensor, "N N"],
-    Float[torch.Tensor, "B"],
-    Float[torch.Tensor, "B"],
-    dict[str, list[float]]]:
+) -> tuple[Complex[torch.Tensor, "N N"], Complex[torch.Tensor, "N N"], Float[torch.Tensor, "B"], Float[torch.Tensor, "B"], dict[str, list[float]]]:
 
     #check_range(captures, 0, 1, "captures")
     #check_range(object, 0, 1, "object")
@@ -104,12 +122,38 @@ def solve_inverse(
 
     output_size = object.shape[0]
     downsample_factor = output_size // captures[0].shape[0]
-    print("Training loop started")
-    print("Capture size:", captures[0].shape[0])
-    print("Output size:", output_size)
-    print("Downsample factor:", downsample_factor)
+    device = object.device
+    
+    # --- 1. 参数校验与初始化 ---
+    use_rigid_body = learn_k_vectors and (led_physics_coords is not None)
+    
+    if use_rigid_body:
+        print(">>> 启用刚体 K-Vector 校准模式 (Global Shift & Rotation)")
+        if wavelength is None or recon_pixel_size is None:
+            raise ValueError("刚体模式需要提供 wavelength 和 recon_pixel_size")
+        
+        # 确保坐标在设备上
+        led_physics_coords = led_physics_coords.to(device)
+        
+        # 初始化 4 个刚体参数: [dx, dy, dz, theta]
+        # 初始设为 0，代表没有额外位移
+        rigid_params = torch.zeros(4, device=device, requires_grad=True)
+        
+        # 初始计算一次 kx, ky 以便后续使用
+        curr_kx, curr_ky = compute_k_from_rigid_body(led_physics_coords, rigid_params, wavelength, recon_pixel_size)
+    
+    else:
+        # 回退到旧模式 (直接使用传入的 kx, ky)
+        if kx_batch is None or ky_batch is None:
+            raise ValueError("如果不使用刚体模式，必须提供 kx_batch 和 ky_batch")
+        curr_kx = kx_batch.detach().clone()
+        curr_ky = ky_batch.detach().clone()
+        if learn_k_vectors: # 旧的单点独立优化模式
+             curr_kx.requires_grad_(True)
+             curr_ky.requires_grad_(True)
 
-    learned_tensors: list[dict[str, torch.Tensor | float]] = []
+    # --- 2. 优化器设置 ---
+    learned_tensors = []
     object = object.clone().detach().requires_grad_(True)
     learned_tensors.append({'params': object, 'lr': 0.1})
 
@@ -117,77 +161,104 @@ def solve_inverse(
         pupil = pupil.clone().detach().requires_grad_(True)
         learned_tensors.append({'params': pupil, 'lr': 0.1})
 
-    if learn_k_vectors:
-        kx_batch = kx_batch.clone().detach().requires_grad_(True)
-        ky_batch = ky_batch.clone().detach().requires_grad_(True)
-        learned_tensors.append({'params': kx_batch, 'lr': 0.1})
-        learned_tensors.append({'params': ky_batch, 'lr': 0.1})
+    if use_rigid_body:
+        # 添加刚体参数到优化器
+        # 建议: 位移(米)通常很小，给大一点的 LR; 角度(弧度)也很小
+        learned_tensors.append({'params': rigid_params, 'lr': 1e-10}) 
+    elif learn_k_vectors:
+        # 旧模式
+        learned_tensors.append({'params': curr_kx, 'lr': 0.1})
+        learned_tensors.append({'params': curr_ky, 'lr': 0.1})
 
-    # Initialize the optimizer
     optimizer = torch.optim.AdamW(learned_tensors)
-
-    # Add scheduler
-    """scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=epochs,  # total epochs
-        eta_min=0.01  # minimum LR
-    )"""
-
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=0.05,
-        total_steps=epochs,
-        pct_start=0.3,
-        anneal_strategy='cos',
-        final_div_factor=1e4,
-    )
-
-    # Telemetry
-    metrics: dict[str, list[float]] = {
-        'loss': [],
-        'lr': []
-    }
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.1, total_steps=epochs, pct_start=0.3)
+    
+    metrics = {'loss': [], 'lr': [], 'dx': [], 'dy': [], 'dz': [], 'theta': []}
 
 
 
 
     if vis_interval:
-        # --- 准备实时显示画布 ---
-        # --- 1. 初始化和准备保存路径 ---
         os.makedirs("output", exist_ok=True)
-        # 计算需要展示的快照数量 (包括最后一帧)
         snapshot_indices = list(range(0, epochs, vis_interval))
         if (epochs - 1) not in snapshot_indices:
             snapshot_indices.append(epochs - 1)
         
         num_snapshots = len(snapshot_indices)
         
-        # 创建大图：每一行代表一次采样，列为 [幅值, 相位]
-        # 增加 figsize 以确保高密度下依然清晰
-        fig, axes = plt.subplots(num_snapshots, 4, figsize=(16, 4 * num_snapshots)) # 增加宽度
-        plt.subplots_adjust(hspace=0.3, wspace=0.2) 
+        # 【修正 1】：必须放在 if vis_interval 内部
+        fig, axes = plt.subplots(num_snapshots, 5, figsize=(22, 4 * num_snapshots)) 
+        plt.subplots_adjust(hspace=0.4, wspace=0.3) 
+        
+        # 【修正 2】：记录初始 K 向量用于对比
+        with torch.no_grad():
+            if use_rigid_body:
+                # 刚体模式：参数为 0 时的位置即初始位置
+                init_kx, init_ky = compute_k_from_rigid_body(
+                    led_physics_coords, torch.zeros(4, device=device), wavelength, recon_pixel_size
+                )
+            else:
+                init_kx, init_ky = curr_kx, curr_ky
+                
+            init_kx_np = init_kx.cpu().numpy()
+            init_ky_np = init_ky.cpu().numpy()
         
         snapshot_count = 0
+    
+    # 修改：4 列变为 5 列，figsize 宽度从 16 增加到 20
+    fig, axes = plt.subplots(num_snapshots, 5, figsize=(20, 4 * num_snapshots)) 
+    plt.subplots_adjust(hspace=0.3, wspace=0.3) 
+    
+    # 提前记录初始 K 向量作为对比基准
+    with torch.no_grad():
+        if use_rigid_body:
+            init_kx, init_ky = compute_k_from_rigid_body(
+                led_physics_coords, torch.zeros(4, device=device), wavelength, recon_pixel_size
+            )
+        else:
+            init_kx, init_ky = kx_batch, ky_batch
+            
+        init_kx_np = init_kx.cpu().numpy()
+        init_ky_np = init_ky.cpu().numpy()
 
     
     # Training loop
     loop = tqdm(range(epochs), desc="Solving")
     for _ in loop:
+        # >>> 关键修改点：在 Forward 之前重新计算 K <<<
+        if use_rigid_body:
+            if _ > 100: 
+                # 允许梯度更新
+                rigid_params.requires_grad_(True)
+                curr_kx, curr_ky = compute_k_from_rigid_body(
+                    led_physics_coords, rigid_params, wavelength, recon_pixel_size
+                )
+            else:
+                # 锁定坐标，仅使用初始值
+                if use_rigid_body:
+                    rigid_params.requires_grad_(False)
+                    curr_kx, curr_ky = compute_k_from_rigid_body(
+                        led_physics_coords, torch.zeros_like(rigid_params), wavelength, recon_pixel_size
+                    )
+            # 记录参数变化
+            metrics['dx'].append(rigid_params[0].item())
+            metrics['dy'].append(rigid_params[1].item())
+            metrics['dz'].append(rigid_params[2].item())
+            metrics['theta'].append(rigid_params[3].item())
         # Batched forward pass
-        predicted_intensities = forward_model(object, pupil, kx_batch, ky_batch, downsample_factor)  # [B, H, W]
+        predicted_intensities = forward_model(object, pupil, curr_kx, curr_ky, downsample_factor)
 
         # Compute loss across all captures
-        total_loss = torch.nn.functional.l1_loss(predicted_intensities, captures)
+        loss = torch.nn.functional.l1_loss(predicted_intensities, captures)
 
         # Backward pass
         optimizer.zero_grad()
-        total_loss.backward()
+        loss.backward()
         optimizer.step()
         scheduler.step()
 
         # Record loss for this epoch
-        current_loss = total_loss.item()
-        metrics['loss'].append(current_loss)
+        metrics['loss'].append(loss.item())
         metrics['lr'].append(scheduler.get_last_lr()[0])
 
 
@@ -221,10 +292,40 @@ def solve_inverse(
                     axes[snapshot_count, 3].imshow(pup_phase, cmap='magma') # 使用不同色阶区分
                     axes[snapshot_count, 3].set_title(f"Ep {_} | Pup Phase")
 
-                    # 统一关闭坐标轴
+                    # --- 第 5 列：LED 坐标 (K-Space) 可视化 ---
+                    ax_k = axes[snapshot_count, 4]
+                    
+                    # 绘制初始位置 (灰色圆点，背景参考)
+                    ax_k.scatter(init_kx_np, init_ky_np, c='gray', s=12, alpha=0.3, label='Initial')
+                    
+                    # 绘制当前位置 (红色 X，实时变化)
+                    curr_kx_v = curr_kx.detach().cpu().numpy()
+                    curr_ky_v = curr_ky.detach().cpu().numpy()
+                    ax_k.scatter(curr_kx_v, curr_ky_v, c='red', s=18, marker='x', linewidths=1, label='Current')
+
+                    # 自动设置坐标轴范围，稍微留白
+                    limit = max(np.abs(init_kx_np).max(), np.abs(init_ky_np).max()) * 1.3
+                    ax_k.set_xlim(-limit, limit)
+                    ax_k.set_ylim(-limit, limit)
+                    ax_k.set_aspect('equal')
+                    ax_k.grid(True, linestyle=':', alpha=0.5)
+                    ax_k.set_title(f"Ep {_} | LED Geometry")
+
+                    # 如果是刚体变换，在 X 轴标签显示物理位移量
+                    if use_rigid_body:
+                        p = rigid_params.detach().cpu().numpy()
+                        # dx, dy 换算为 mm 显示，theta 换算为角度
+                        info_str = f"dx:{p[0]*1e3:.2f}mm dy:{p[1]*1e3:.2f}mm\ndz:{p[2]*1e3:.2f}mm rot:{np.degrees(p[3]):.2f}°"
+                        ax_k.set_xlabel(info_str, fontsize=9, color='blue')
+
+                    # 只有第一行显示图例，避免重复
+                    if snapshot_count == 0:
+                        ax_k.legend(loc='upper right', fontsize=8)
+
+                    # 统一处理坐标轴开关
                     for col in range(4):
                         axes[snapshot_count, col].axis('off')
-
+                    
                     snapshot_count += 1
 
 
@@ -241,13 +342,12 @@ def solve_inverse(
     final_object = object.detach()
     final_pupil = pupil.detach()
 
-    if learn_k_vectors:
-        final_kx = kx_batch.detach()
-        final_ky = ky_batch.detach()
+    if use_rigid_body:
+        with torch.no_grad():
+             final_kx, final_ky = compute_k_from_rigid_body(led_physics_coords, rigid_params, wavelength, recon_pixel_size)
     else:
-        # 若未学习，则返回原始值（保持接口一致）
-        final_kx = kx_batch
-        final_ky = ky_batch
+        final_kx, final_ky = curr_kx.detach(), curr_ky.detach()
 
-    return final_object, final_pupil, final_kx, final_ky, metrics
+    return object.detach(), pupil.detach(), final_kx, final_ky, metrics
+
 
