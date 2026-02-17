@@ -30,7 +30,7 @@ with open(CONFIG_JSON_PATH, 'r', encoding='utf-8') as f:
 
 # A. 从 JSON 中读取系统物理参数
 NA_OBJECTIVE = config_data.get('NA_OBJECTIVE', 0.5)          # 物镜 NA
-WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 465)        # LED 波长 (nm)
+WAVELENGTH_NM = config_data.get('WAVELENGTH_NM', 525)        # LED 波长 (nm)
 MAGNIFICATION = config_data.get('MAGNIFICATION', 10.0)       # 物镜放大倍率
 CAMERA_PIXEL_SIZE_UM = config_data.get('CAMERA_PIXEL_SIZE_UM', 3.45) # 相机像素尺寸 (um)
 
@@ -41,7 +41,7 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
 LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
+DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = True # 修正k-vector误差

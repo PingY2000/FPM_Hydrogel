@@ -251,6 +251,12 @@ def solve_inverse(
         # Compute loss across all captures
         loss = torch.nn.functional.l1_loss(predicted_intensities, captures)
 
+        if use_rigid_body:
+            # 物理约束：惩罚偏离原点。系数 1e5 是因为 dx^2 数值非常小(如 1e-6)
+            # 这个正则项会拉住坐标，不让它乱飞
+            reg_loss = torch.sum(rigid_params**2) * 1e5 
+            loss = loss + reg_loss
+
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
