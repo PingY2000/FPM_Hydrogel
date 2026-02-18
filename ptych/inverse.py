@@ -49,7 +49,70 @@ def compute_k_from_rigid_body(
     ky_new = (na_y / wavelength) * recon_pixel_size
     
     return kx_new, ky_new
+def calculate_k_vectors_from_positions(
+    filepath: str,
+    lambda_nm: float,
+    magnification: float,
+    camera_pixel_size_um: float,
+    recon_pixel_size_m: float,
+    loaded_led_indices: list[int],          
+    device: torch.device,                   
+    center_led_index: int = 1,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    从LED物理位置CSV文件计算归一化k-vectors，
+    并返回筛选后的 led_coords_batch, kx_estimated, ky_estimated
+    """
 
+    lambda_m = lambda_nm * 1e-9
+
+    # -------------------------
+    # 1️⃣ 读取 CSV
+    # -------------------------
+    df = pd.read_csv(filepath)
+
+    # -------------------------
+    # 2️⃣ 构造 LED 坐标 Tensor
+    # -------------------------
+    X_m = torch.tensor(df['X'].values * 1e-3, dtype=torch.float32, device=device)
+    Y_m = torch.tensor(df['Y'].values * 1e-3, dtype=torch.float32, device=device)
+    Z_m = torch.tensor(df['Z'].values * 1e-3, dtype=torch.float32, device=device)
+
+    all_led_coords = torch.stack([X_m, Y_m, Z_m], dim=1)
+
+    # -------------------------
+    # 3️⃣ 计算 NA
+    # -------------------------
+    #na_x = np.sin(np.arctan(X_m / Z_m))
+    #na_y = np.sin(np.arctan(Y_m / Z_m))
+    R = torch.sqrt(X_m**2 + Y_m**2 + Z_m**2)
+    na_x = X_m / R
+    na_y = Y_m / R
+
+    # -------------------------
+    # 4️⃣ 归一化 k-vectors
+    # -------------------------
+    kx_normalized = (na_x / lambda_m) * recon_pixel_size_m
+    ky_normalized = (na_y / lambda_m) * recon_pixel_size_m
+
+    #print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
+    #print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
+
+    # -------------------------
+    # 5️⃣ 根据 loaded_led_indices 进行筛选
+    # -------------------------
+    indices_for_slicing = torch.tensor(
+        loaded_led_indices,
+        dtype=torch.long,
+        device=device
+    ) - 1   # 从1-based转为0-based
+
+    led_coords_batch = all_led_coords[indices_for_slicing]
+    kx = kx_normalized[indices_for_slicing]
+    ky = ky_normalized[indices_for_slicing]
+
+    return led_coords_batch, kx, ky
+'''
 def calculate_k_vectors_from_positions(
     filepath: str,
     lambda_nm: float,
@@ -69,20 +132,10 @@ def calculate_k_vectors_from_positions(
 
 
 
-    # --- 中心校准 ---
-    center_idx_in_df = center_led_index - 1 # DataFrame 索引从0开始
-    x_center = X_m[center_idx_in_df]
-    y_center = Y_m[center_idx_in_df]
-    print(f"Centering k-vectors around LED #{center_led_index} at (X={x_center*1e3:.2f}, Y={y_center*1e3:.2f}) mm")
-    X_m_centered = X_m #- x_center
-    Y_m_centered = Y_m #- y_center
-
-
-
     # --- 计算 NA ---
     # 使用独立计算，这在大多数情况下足够准确
-    na_x = np.sin(np.arctan(X_m_centered / Z_m))
-    na_y = np.sin(np.arctan(Y_m_centered / Z_m))
+    na_x = np.sin(np.arctan(X_m / Z_m))
+    na_y = np.sin(np.arctan(Y_m / Z_m))
 
 
 
@@ -96,7 +149,7 @@ def calculate_k_vectors_from_positions(
     print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
 
     return torch.from_numpy(kx_normalized).float(), torch.from_numpy(ky_normalized).float()
-
+'''
 def solve_inverse(
     captures: Float[torch.Tensor, "B n n"],
     object: Complex[torch.Tensor, "N N"],

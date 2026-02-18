@@ -106,7 +106,7 @@ def load_real_captures(folder_path: str, file_pattern: str = "*.tif") -> tuple[t
     captures = captures / global_scale
 
     print(f"Successfully loaded and sorted {len(captures)} images.")
-    print(f"Detected LED indices: {led_indices[:5]}...{led_indices[-5:]}")
+    print(f"Detected LED indices: {led_indices[:]}")
     
     return captures, led_indices
 
@@ -124,74 +124,3 @@ def create_circular_pupil(shape: tuple[int, int], radius: int) -> torch.Tensor:
     pupil = (dist < radius).to(torch.complex64)
     return pupil
 
-
-def visualize_kspace_and_captures(
-    captures: torch.Tensor,
-    kx_normalized: torch.Tensor,
-    ky_normalized: torch.Tensor,
-    output_filename: str = "output/capture_orientation_validation.png"
-):
-    print("Generating capture orientation validation plot...")
-    
-    num_captures = len(captures)
-    grid_size = int(np.ceil(np.sqrt(num_captures)))
-    fig, axes = plt.subplots(grid_size, grid_size, figsize=(grid_size * 2, grid_size * 2))
-    
-    # 自动计算缩放因子：
-    # 假设 k 向量的最大模长约为 0.5，我们希望最长的箭头占据图像半径的 80%
-    h, w = captures.shape[-2:]
-    center_x, center_y = w / 2, h / 2
-    max_arrow_len = min(h, w) * 0.4  # 图像短边的一半再乘以 0.8
-    
-    # 获取所有 k 向量的模长，用于归一化长度比例
-    k_norms = torch.sqrt(kx_normalized**2 + ky_normalized**2)
-    max_k = torch.max(k_norms).item() if torch.max(k_norms) > 0 else 1.0
-    # 这里的 scale 保证了物理意义上的比例：k 越大，箭头越长
-    auto_scale = max_arrow_len / max_k 
-
-    captures_np = captures.cpu().numpy()
-
-    for i, ax in enumerate(axes.flat):
-        if i < num_captures:
-            ax.imshow(captures_np[i], cmap='gray')
-
-            kx = kx_normalized[i].item()
-            ky = ky_normalized[i].item()
-            kn = k_norms[i].item()
-
-            if kn < 1e-5:
-                # 绘制中心点标记 (零向量照明)
-                circle = Circle((center_x, center_y), radius=w*0.05, fill=False, color='cyan', linewidth=1.5)
-                ax.add_patch(circle)
-                ax.plot([center_x - w*0.03, center_x + w*0.03], [center_y, center_y], color='cyan', linewidth=1)
-                ax.plot([center_x, center_x], [center_y - h*0.03, center_y + h*0.03], color='cyan', linewidth=1)
-            else:
-                # 计算位移向量：指向中心
-                dx = kx * auto_scale
-                dy = ky * auto_scale 
-
-                # 逻辑说明：
-                # 箭头的终点固定在中心 (center_x, center_y)
-                # 起点则根据 k 向量的反方向偏移得出
-                ax.annotate(
-                    '', 
-                    xy=(center_x, center_y),           # 箭头尖端位置 (中心)
-                    xytext=(center_x - dx, center_y - dy), # 箭头尾部位置
-                    arrowprops=dict(
-                        arrowstyle='->, head_width=0.3, head_length=0.5',
-                        color='red',
-                        lw=1.5,
-                        shrinkA=0, # 不在起点缩进
-                        shrinkB=0  # 不在终点缩进
-                    ),
-                    zorder=10
-                )
-                
-            ax.set_title(f"Idx {i}\n$k:[{kx:.2f}, {ky:.2f}]$", fontsize=7)
-        ax.axis('off')
-
-    plt.suptitle("Illumination Directions: Red arrows point TO center", fontsize=16)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(output_filename, dpi=150)
-    plt.close()
-    print(f"Validation plot saved to {output_filename}")
