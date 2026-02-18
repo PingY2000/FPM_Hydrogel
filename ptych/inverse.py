@@ -13,7 +13,8 @@ def compute_k_from_rigid_body(
     led_coords_init: torch.Tensor, # [B, 3] (x, y, z) in meters
     params: torch.Tensor,          # [4] (dx, dy, dz, theta)
     wavelength: float,             # meters
-    recon_pixel_size: float        # meters
+    recon_pixel_size: float,       # meters
+    n_medium: float = 1.0
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     根据刚体变换参数实时计算 kx, ky
@@ -45,8 +46,8 @@ def compute_k_from_rigid_body(
     
     # 5. 归一化到 [-0.5, 0.5] 空间 (cycles per pixel)
     # k = sin(theta) / lambda * pixel_size
-    kx_new = (na_x / wavelength) * recon_pixel_size
-    ky_new = (na_y / wavelength) * recon_pixel_size
+    kx_new = (n_medium * na_x / wavelength) * recon_pixel_size
+    ky_new = (n_medium * na_y / wavelength) * recon_pixel_size
     
     return kx_new, ky_new
 def calculate_k_vectors_from_positions(
@@ -58,6 +59,7 @@ def calculate_k_vectors_from_positions(
     loaded_led_indices: list[int],          
     device: torch.device,                   
     center_led_index: int = 1,
+    n_medium: float = 1.0
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     从LED物理位置CSV文件计算归一化k-vectors，
@@ -92,8 +94,8 @@ def calculate_k_vectors_from_positions(
     # -------------------------
     # 4️⃣ 归一化 k-vectors
     # -------------------------
-    kx_normalized = (na_x / lambda_m) * recon_pixel_size_m
-    ky_normalized = (na_y / lambda_m) * recon_pixel_size_m
+    kx_normalized = (n_medium * na_x / lambda_m) * recon_pixel_size_m
+    ky_normalized = (n_medium * na_y / lambda_m) * recon_pixel_size_m
 
     #print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
     #print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
@@ -112,44 +114,7 @@ def calculate_k_vectors_from_positions(
     ky = ky_normalized[indices_for_slicing]
 
     return led_coords_batch, kx, ky
-'''
-def calculate_k_vectors_from_positions(
-    filepath: str,
-    lambda_nm: float,
-    magnification: float,
-    camera_pixel_size_um: float,
-    recon_pixel_size_m: float,
-    center_led_index: int = 1,
-) -> tuple[torch.Tensor, torch.Tensor]:
 
-    """从LED物理位置CSV文件计算归一化的k-vectors。"""
-    lambda_m = lambda_nm * 1e-9 
-
-    df = pd.read_csv(filepath)
-    X_m = df['X'].values * 1e-3
-    Y_m = df['Y'].values * 1e-3
-    Z_m = df['Z'].values * 1e-3
-
-
-
-    # --- 计算 NA ---
-    # 使用独立计算，这在大多数情况下足够准确
-    na_x = np.sin(np.arctan(X_m / Z_m))
-    na_y = np.sin(np.arctan(Y_m / Z_m))
-
-
-
-    # --- 转换为归一化 k-vectors ---
-    # k_normalized 的单位是 "cycles per pixel"
-    # 它代表了由该NA在样品平面上，每个像素经历的相位周期数
-    kx_normalized = na_x / lambda_m * recon_pixel_size_m
-    ky_normalized = na_y / lambda_m * recon_pixel_size_m
-
-    print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
-    print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
-
-    return torch.from_numpy(kx_normalized).float(), torch.from_numpy(ky_normalized).float()
-'''
 def solve_inverse(
     captures: Float[torch.Tensor, "B n n"],
     object: Complex[torch.Tensor, "N N"],

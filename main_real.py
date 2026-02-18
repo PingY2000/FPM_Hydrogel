@@ -13,7 +13,6 @@ from utils import (
     get_default_device,
     load_real_captures,
     create_circular_pupil,
-    
 )
 from visualize import(
     visualize_kspace_and_captures,
@@ -21,7 +20,6 @@ from visualize import(
     visualize_pupil,
     save_training_metrics
 )
-
 
 # --- 1. 用户配置 (User Configuration) ---
 # ----------------------------------------------------
@@ -106,10 +104,8 @@ pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) * recon_pixel_size
 print(f"Calculated initial pupil radius: {pupil_radius_pixels:.1f} pixels")
 pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil_radius_pixels))
 
-
 # E. 创建物体初始猜测
 object_guess = 0.5 * torch.ones(int(output_size), int(output_size), dtype=torch.complex64)
-
 
 # --- 5. 运行FPM重建 ---
 # ----------------------------------------------------
@@ -132,7 +128,6 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     vis_interval=VIS_INTERVAL
 )
 print("Reconstruction finished.")
-
 
 # --- 6. 可视化结果 & 保存结果 ---
 save_training_metrics(metrics)
