@@ -172,27 +172,44 @@ def solve_inverse(
 
     # --- 2. 优化器设置 ---
     learned_tensors = []
-    object = object.clone().detach().requires_grad_(True)
-    learned_tensors.append({'params': object, 'lr': 0.1})
+    base_max_lrs = []  # 用于动态存储每个组的最大学习率
 
+    # 1. Object 参数
+    object = object.clone().detach().requires_grad_(True)
+    learned_tensors.append({'params': object})
+    base_max_lrs.append(0.1) 
+
+    # 2. Pupil 参数 (动态添加)
     if learn_pupil:
         pupil = pupil.clone().detach().requires_grad_(True)
-        learned_tensors.append({'params': pupil, 'lr': 0.1})
+        learned_tensors.append({'params': pupil})
+        base_max_lrs.append(0.1)
 
+    # 3. 刚体变换或 K 向量参数 (动态添加)
     if use_rigid_body:
-        # 添加刚体参数到优化器
-        # 建议: 位移(米)通常很小，给大一点的 LR; 角度(弧度)也很小
-        learned_tensors.append({'params': rigid_params, 'lr': 1e-10}) 
+        # 刚体参数 [dx, dy, dz, theta]
+        # 注意：这里我们先初始化，requires_grad 在循环里根据 epoch 切换
+        learned_tensors.append({'params': rigid_params})
+        base_max_lrs.append(1e-3) # 这里设为 1e-3，OneCycle 会从约 4e-5 开始增加
     elif learn_k_vectors:
-        # 旧模式
-        learned_tensors.append({'params': curr_kx, 'lr': 0.1})
-        learned_tensors.append({'params': curr_ky, 'lr': 0.1})
+        # 旧模式：独立优化每个 LED 的 kx, ky
+        learned_tensors.append({'params': curr_kx})
+        base_max_lrs.append(0.1)
+        learned_tensors.append({'params': curr_ky})
+        base_max_lrs.append(0.1)
 
+    # 初始化优化器
     optimizer = torch.optim.AdamW(learned_tensors)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.1, total_steps=epochs, pct_start=0.3)
+
+    # 初始化调度器：使用动态生成的 base_max_lrs 列表
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=base_max_lrs, 
+        total_steps=epochs, 
+        pct_start=0.3
+    )
     
     metrics = {'loss': [], 'lr': [], 'dx': [], 'dy': [], 'dz': [], 'theta': []}
-
 
 
 
