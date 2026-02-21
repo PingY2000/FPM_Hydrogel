@@ -8,7 +8,13 @@ import os
 import json
 import pandas as pd
 
-from ptych import solve_inverse, analysis, calculate_k_vectors_from_positions, compute_k_from_rigid_body
+from ptych import (
+    solve_inverse, 
+    solve_inverse_slice, 
+    analysis, 
+    calculate_k_vectors_from_positions, 
+    compute_k_from_rigid_body
+)
 from utils import (
     get_default_device,
     load_real_captures,
@@ -49,8 +55,8 @@ DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = True # 修正k-vector误差
-USE_RIGID_BODY= True # 启动刚体校准
-EPOCHS = 200 # Epochs 上限
+USE_RIGID_BODY= False # 启动刚体校准
+EPOCHS = 300 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
 
 
@@ -116,6 +122,7 @@ object_guess = F.interpolate(captures[0:1, None, :, :],
 # --- 5. 运行FPM重建 ---
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
+
 reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = solve_inverse(
     captures=captures,
     object=object_guess,
@@ -130,8 +137,30 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     epochs=EPOCHS, 
     vis_interval=VIS_INTERVAL
 )
-print("Reconstruction finished.")
 
+'''
+D = 1
+slice_spacing_m = 10e-6
+object_guess = torch.ones((D, output_size, output_size), dtype=torch.complex64, device=pytorch_device)
+
+reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = solve_inverse_slice(
+    captures=captures,
+    object=object_guess,
+    pupil=pupil_guess,
+    led_physics_coords=led_coords_batch if USE_RIGID_BODY else None,
+    wavelength=wavelength_val,
+    recon_pixel_size=recon_pixel_size_m,
+    kx_batch=kx_estimated, 
+    ky_batch=ky_estimated, 
+    learn_pupil=LEARN_PUPIL,       
+    learn_k_vectors=LEARN_K_VECTORS, 
+    epochs=EPOCHS, 
+    vis_interval=VIS_INTERVAL,
+    slice_spacing=slice_spacing_m,
+    tv_weight=1e-4
+)
+'''
+print("Reconstruction finished.")
 # --- 6. 可视化结果 & 保存结果 ---
 save_training_metrics(metrics)
 visualize_reconstruction(reconstructed_object)

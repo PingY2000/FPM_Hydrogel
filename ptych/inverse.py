@@ -1,5 +1,5 @@
 # ptych\inverse.py
-from ptych.forward import forward_model
+from ptych.forward import forward_model, forward_model_multislice
 import matplotlib.pyplot as plt
 #from ptych.utils import check_range
 import torch
@@ -289,7 +289,14 @@ def solve_inverse(
         if use_rigid_body:
             # 物理约束：惩罚偏离原点。系数 1e5 是因为 dx^2 数值非常小(如 1e-6)
             # 这个正则项会拉住坐标，不让它乱飞
-            reg_loss = torch.sum(rigid_params**2) * 1e5 
+            # 将物理量除以它们的典型偏差范围，再平方
+            scale_d = 1e-3  # 毫米级别的容忍度
+            scale_theta = 0.05 # 约 3 度的容忍度
+            reg_loss = ( (rigid_params[0]/scale_d)**2 + 
+                        (rigid_params[1]/scale_d)**2 + 
+                        (rigid_params[2]/scale_d)**2 + 
+                        (rigid_params[3]/scale_theta)**2 ) * 0.1 # 控制整体权重
+            #reg_loss = torch.sum(rigid_params**2) * 1e5 
             loss = loss + reg_loss
 
         # Backward pass
@@ -390,5 +397,241 @@ def solve_inverse(
         final_kx, final_ky = curr_kx.detach(), curr_ky.detach()
 
     return object.detach(), pupil.detach(), final_kx, final_ky, metrics
+
+def compute_tv_loss(x: torch.Tensor) -> torch.Tensor:
+    """计算 3D 复合张量的全变分 (Total Variation)"""
+    # 空间维度 TV (X 和 Y 方向)
+    tv_h = torch.sum(torch.abs(x[:, 1:, :] - x[:, :-1, :]))
+    tv_w = torch.sum(torch.abs(x[:, :, 1:] - x[:, :, :-1]))
+    # 深度维度 TV (Z 方向) - 使得相邻切片之间过渡平滑
+    tv_d = torch.sum(torch.abs(x[1:, :, :] - x[:-1, :, :])) if x.shape[0] > 1 else 0.0
+    return tv_h + tv_w + tv_d
+
+def solve_inverse_slice(
+    captures: Float[torch.Tensor, "B n n"],
+    object: Complex[torch.Tensor, "D N N"], # >>> 3D 修改：支持 D 层切片 <<<
+    pupil: Complex[torch.Tensor, "N N"],
+    led_physics_coords: Float[torch.Tensor, "B 3"] | None = None, 
+    wavelength: float | None = None,       
+    recon_pixel_size: float | None = None, 
+    slice_spacing: float = 0.0,            # >>> 3D 修改：切片物理间距 (米) <<<
+    kx_batch: Float[torch.Tensor, "B"] | None = None, 
+    ky_batch: Float[torch.Tensor, "B"] | None = None,
+    
+    learn_pupil: bool = True,
+    learn_k_vectors: bool = False, 
+    epochs: int = 500,
+    vis_interval: int = 0,
+    tv_weight: float = 1e-4,               # >>> 3D 修改：TV正则化权重 <<<
+) -> tuple[Complex[torch.Tensor, "D N N"], Complex[torch.Tensor, "N N"], Float[torch.Tensor, "B"], Float[torch.Tensor, "B"], dict[str, list[float]]]:
+
+    # 提取切片数和输出尺寸
+    D, output_size, _ = object.shape
+    downsample_factor = output_size // captures[0].shape[0]
+    device = object.device
+    
+    # --- 1. 参数校验与初始化 ---
+    use_rigid_body = learn_k_vectors and (led_physics_coords is not None)
+    
+    if use_rigid_body:
+        print(">>> 启用刚体 K-Vector 校准模式 (Global Shift & Rotation)")
+        if wavelength is None or recon_pixel_size is None:
+            raise ValueError("刚体模式需要提供 wavelength 和 recon_pixel_size")
+        
+        led_physics_coords = led_physics_coords.to(device)
+        rigid_params = torch.zeros(4, device=device, requires_grad=True)
+        curr_kx, curr_ky = compute_k_from_rigid_body(led_physics_coords, rigid_params, wavelength, recon_pixel_size)
+    else:
+        if kx_batch is None or ky_batch is None:
+            raise ValueError("如果不使用刚体模式，必须提供 kx_batch 和 ky_batch")
+        curr_kx = kx_batch.detach().clone()
+        curr_ky = ky_batch.detach().clone()
+        if learn_k_vectors: 
+             curr_kx.requires_grad_(True)
+             curr_ky.requires_grad_(True)
+             
+        # 安全检查：如果在 3D 模式下未提供波长和像素尺寸，将无法计算 ASM 传播
+        if D > 1 and (wavelength is None or recon_pixel_size is None):
+            raise ValueError("3D Multi-slice 模式必须提供 wavelength 和 recon_pixel_size 以计算空间传播")
+
+    # --- 2. 优化器设置 ---
+    learned_tensors = []
+    base_max_lrs = [] 
+
+    # 1. Object 参数
+    object = object.clone().detach().requires_grad_(True)
+    learned_tensors.append({'params': object})
+    base_max_lrs.append(0.1) 
+
+    # 2. Pupil 参数 
+    if learn_pupil:
+        pupil = pupil.clone().detach().requires_grad_(True)
+        learned_tensors.append({'params': pupil})
+        base_max_lrs.append(0.1)
+
+    # 3. 刚体变换或 K 向量参数 
+    if use_rigid_body:
+        learned_tensors.append({'params': rigid_params})
+        base_max_lrs.append(1e-3) 
+    elif learn_k_vectors:
+        learned_tensors.append({'params': curr_kx})
+        base_max_lrs.append(0.1)
+        learned_tensors.append({'params': curr_ky})
+        base_max_lrs.append(0.1)
+
+    optimizer = torch.optim.AdamW(learned_tensors)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=base_max_lrs, total_steps=epochs, pct_start=0.3
+    )
+    
+    metrics = {'loss': [], 'lr': [], 'dx': [], 'dy': [], 'dz': [], 'theta': []}
+
+    if vis_interval:
+        os.makedirs("output", exist_ok=True)
+        snapshot_indices = list(range(0, epochs, vis_interval))
+        if (epochs - 1) not in snapshot_indices:
+            snapshot_indices.append(epochs - 1)
+        
+        num_snapshots = len(snapshot_indices)
+        snapshot_count = 0
+    
+        fig, axes = plt.subplots(num_snapshots, 5, figsize=(20, 4 * num_snapshots)) 
+        if num_snapshots == 1:
+            axes = np.expand_dims(axes, 0) # 处理单行 subplots 的维度问题
+        plt.subplots_adjust(hspace=0.3, wspace=0.3) 
+    
+        with torch.no_grad():
+            if use_rigid_body:
+                init_kx, init_ky = compute_k_from_rigid_body(
+                    led_physics_coords, torch.zeros(4, device=device), wavelength, recon_pixel_size
+                )
+            else:
+                init_kx, init_ky = curr_kx, curr_ky
+                
+            init_kx_np = init_kx.cpu().numpy()
+            init_ky_np = init_ky.cpu().numpy()
+
+    # --- 3. Training loop ---
+    loop = tqdm(range(epochs), desc=f"Solving ({D} Slices)")
+    for _ in loop:
+        if use_rigid_body:
+            if _ > 100: 
+                rigid_params.requires_grad_(True)
+                curr_kx, curr_ky = compute_k_from_rigid_body(
+                    led_physics_coords, rigid_params, wavelength, recon_pixel_size
+                )
+            else:
+                rigid_params.requires_grad_(False)
+                curr_kx, curr_ky = compute_k_from_rigid_body(
+                    led_physics_coords, torch.zeros_like(rigid_params), wavelength, recon_pixel_size
+                )
+            metrics['dx'].append(rigid_params[0].item())
+            metrics['dy'].append(rigid_params[1].item())
+            metrics['dz'].append(rigid_params[2].item())
+            metrics['theta'].append(rigid_params[3].item())
+
+        # >>> 3D 修改：调用多层传播前向模型 <<<
+        predicted_intensities = forward_model_multislice(
+            object_tensor=object, 
+            pupil_tensor=pupil, 
+            kx=curr_kx, 
+            ky=curr_ky, 
+            wavelength=wavelength,
+            recon_pixel_size=recon_pixel_size,
+            slice_spacing=slice_spacing,
+            downsample_factor=downsample_factor
+        )
+
+        # 数据拟合 Loss
+        data_loss = torch.nn.functional.l1_loss(predicted_intensities, captures)
+        
+        # >>> 3D 修改：加入水凝胶背景 TV 约束 <<<
+        reg_tv_loss = tv_weight * compute_tv_loss(object)
+        loss = data_loss + reg_tv_loss
+
+        if use_rigid_body:
+            scale_d = 1e-3 
+            scale_theta = 0.05 
+            reg_rigid_loss = ( (rigid_params[0]/scale_d)**2 + 
+                        (rigid_params[1]/scale_d)**2 + 
+                        (rigid_params[2]/scale_d)**2 + 
+                        (rigid_params[3]/scale_theta)**2 ) * 0.1 
+            loss = loss + reg_rigid_loss
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        metrics['loss'].append(loss.item())
+        metrics['lr'].append(scheduler.get_last_lr()[0])
+
+        if vis_interval and _ in snapshot_indices:
+            with torch.no_grad():
+                # >>> 3D 修改：提取中心切片进行可视化 <<<
+                mid_slice = D // 2
+                obj_np = object[mid_slice].detach().cpu()
+                obj_amp = torch.abs(obj_np).numpy()
+                obj_phase = torch.angle(obj_np).numpy()
+
+                pup_np = pupil.detach().cpu()
+                pup_amp = torch.abs(pup_np).numpy()
+                pup_phase = torch.angle(pup_np).numpy()
+
+                axes[snapshot_count, 0].imshow(obj_amp, cmap='gray')
+                axes[snapshot_count, 0].set_title(f"Ep {_} | Slice {mid_slice} Amp")
+                
+                axes[snapshot_count, 1].imshow(obj_phase, cmap='viridis')
+                axes[snapshot_count, 1].set_title(f"Ep {_} | Slice {mid_slice} Phase")
+                
+                axes[snapshot_count, 2].imshow(pup_amp, cmap='gray')
+                axes[snapshot_count, 2].set_title(f"Ep {_} | Pup Amp")
+                
+                axes[snapshot_count, 3].imshow(pup_phase, cmap='magma') 
+                axes[snapshot_count, 3].set_title(f"Ep {_} | Pup Phase")
+
+                ax_k = axes[snapshot_count, 4]
+                ax_k.scatter(init_kx_np, init_ky_np, c='gray', s=12, alpha=0.3, label='Initial')
+                
+                curr_kx_v = curr_kx.detach().cpu().numpy()
+                curr_ky_v = curr_ky.detach().cpu().numpy()
+                ax_k.scatter(curr_kx_v, curr_ky_v, c='red', s=18, marker='x', linewidths=1, label='Current')
+
+                limit = max(np.abs(init_kx_np).max(), np.abs(init_ky_np).max()) * 1.3
+                ax_k.set_xlim(-limit, limit)
+                ax_k.set_ylim(-limit, limit)
+                ax_k.set_aspect('equal')
+                ax_k.grid(True, linestyle=':', alpha=0.5)
+                ax_k.set_title(f"Ep {_} | LED Geometry")
+
+                if use_rigid_body:
+                    p = rigid_params.detach().cpu().numpy()
+                    info_str = f"dx:{p[0]*1e3:.2f}mm dy:{p[1]*1e3:.2f}mm\ndz:{p[2]*1e3:.2f}mm rot:{np.degrees(p[3]):.2f}°"
+                    ax_k.set_xlabel(info_str, fontsize=9, color='blue')
+
+                if snapshot_count == 0:
+                    ax_k.legend(loc='upper right', fontsize=8)
+
+                for col in range(4):
+                    axes[snapshot_count, col].axis('off')
+                
+                snapshot_count += 1
+
+    if vis_interval:
+        save_path = "output/iteration_process_dense.png"
+        plt.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close(fig) 
+        print(f"\nIteration progress saved to: {save_path}")
+
+    final_object = object.detach()
+    final_pupil = pupil.detach()
+
+    if use_rigid_body:
+        with torch.no_grad():
+             final_kx, final_ky = compute_k_from_rigid_body(led_physics_coords, rigid_params, wavelength, recon_pixel_size)
+    else:
+        final_kx, final_ky = curr_kx.detach(), curr_ky.detach()
+
+    return final_object, final_pupil, final_kx, final_ky, metrics
 
 
