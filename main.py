@@ -1,17 +1,15 @@
-# main_real.py
+# main.py
 
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
-import ptych
 import os
 import json
 import pandas as pd
 
-from ptych import (
+from inverse import (
     solve_inverse, 
     solve_inverse_slice, 
-    analysis, 
     calculate_k_vectors_from_positions, 
     compute_k_from_rigid_body
 )

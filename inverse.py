@@ -1,7 +1,7 @@
-# ptych\inverse.py
-from ptych.forward import forward_model, forward_model_multislice
+# inverse.py
+from forward import forward_model, forward_model_multislice
 import matplotlib.pyplot as plt
-#from ptych.utils import check_range
+from utils import check_range
 import torch
 from tqdm import tqdm
 from jaxtyping import Float, Complex

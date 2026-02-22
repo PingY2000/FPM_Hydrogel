@@ -18,6 +18,13 @@ def get_default_device() -> torch.device:
         return torch.device("mps")
     return torch.device("cpu")
 
+def check_range(tensor: torch.Tensor, min_val: float, max_val: float, name: str | None = None):
+    if not torch.all(tensor >= min_val) or not torch.all(tensor <= max_val):
+        if name is not None:
+            raise ValueError(f"{name} values are out of range [{min_val}, {max_val}] (found {tensor.min().item()}, {tensor.max().item()})")
+        else:
+            raise ValueError(f"Tensor values are out of range [{min_val}, {max_val}] (found {tensor.min().item()}, {tensor.max().item()})")
+                            
 def decode_hex_to_led_index(hex_str: str) -> int:
     """
     核心解码逻辑：
