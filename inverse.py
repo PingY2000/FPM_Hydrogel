@@ -1,4 +1,5 @@
 # inverse.py
+
 from forward import forward_model, forward_model_multislice
 import matplotlib.pyplot as plt
 from utils import check_range
@@ -146,27 +147,20 @@ def solve_inverse(
     use_rigid_body = learn_k_vectors and (led_physics_coords is not None)
     
     if use_rigid_body:
-        print(">>> 启用刚体 K-Vector 校准模式 (Global Shift & Rotation)")
+        print(">>> 启用 K-Vector 校准 (Global Shift & Rotation)")
         if wavelength is None or recon_pixel_size is None:
-            raise ValueError("刚体模式需要提供 wavelength 和 recon_pixel_size")
-        
-        # 确保坐标在设备上
+            raise ValueError("需要提供 wavelength 和 recon_pixel_size")
         led_physics_coords = led_physics_coords.to(device)
-        
-        # 初始化 4 个刚体参数: [dx, dy, dz, theta]
-        # 初始设为 0，代表没有额外位移
         rigid_params = torch.zeros(4, device=device, requires_grad=True)
-        
-        # 初始计算一次 kx, ky 以便后续使用
         curr_kx, curr_ky = compute_k_from_rigid_body(led_physics_coords, rigid_params, wavelength, recon_pixel_size)
-    
     else:
         # 回退到旧模式 (直接使用传入的 kx, ky)
         if kx_batch is None or ky_batch is None:
-            raise ValueError("如果不使用刚体模式，必须提供 kx_batch 和 ky_batch")
+            raise ValueError("须提供 kx_batch 和 ky_batch")
         curr_kx = kx_batch.detach().clone()
         curr_ky = ky_batch.detach().clone()
         if learn_k_vectors: # 旧的单点独立优化模式
+             print(">>> 启用 K-Vector 校准 ")
              curr_kx.requires_grad_(True)
              curr_ky.requires_grad_(True)
 
@@ -194,11 +188,10 @@ def solve_inverse(
     elif learn_k_vectors:
         # 旧模式：独立优化每个 LED 的 kx, ky
         learned_tensors.append({'params': curr_kx})
-        base_max_lrs.append(0.1)
+        base_max_lrs.append(1e-2)
         learned_tensors.append({'params': curr_ky})
-        base_max_lrs.append(0.1)
+        base_max_lrs.append(1e-2)
 
-    # 初始化优化器
     optimizer = torch.optim.AdamW(learned_tensors)
 
     # 初始化调度器：使用动态生成的 base_max_lrs 列表
@@ -221,11 +214,9 @@ def solve_inverse(
         
         num_snapshots = len(snapshot_indices)
         
-        # 【修正 1】：必须放在 if vis_interval 内部
         fig, axes = plt.subplots(num_snapshots, 5, figsize=(22, 4 * num_snapshots)) 
         plt.subplots_adjust(hspace=0.4, wspace=0.3) 
         
-        # 【修正 2】：记录初始 K 向量用于对比
         with torch.no_grad():
             if use_rigid_body:
                 # 刚体模式：参数为 0 时的位置即初始位置

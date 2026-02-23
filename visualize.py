@@ -82,7 +82,7 @@ def visualize_kspace_and_captures(
     plt.savefig(output_filename, dpi=150)
     plt.close()
     print(f"Validation plot saved to {output_filename}")
-
+'''
 def visualize_reconstruction(reconstructed_object, output_dir="output"):
     """
     可视化并保存最终重建的振幅和相位
@@ -118,7 +118,79 @@ def visualize_reconstruction(reconstructed_object, output_dir="output"):
         final_phase.cpu().detach().numpy(),
         cmap='viridis'
     )
+'''
+def visualize_reconstruction(reconstructed_object, output_dir="output"):
+    """
+    可视化并保存最终重建结果。
+    兼容 2D [N, N] 和 3D [D, N, N] 对象。
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 统一转为 CPU numpy 方便处理
+    obj_np = reconstructed_object.detach().cpu()
+    
+    # 如果是 2D，增加一个虚假的 D 维度，统一逻辑
+    if obj_np.ndim == 2:
+        obj_np = obj_np.unsqueeze(0)
+    
+    D, N, _ = obj_np.shape
+    amplitudes = torch.abs(obj_np).numpy()
+    phases = torch.angle(obj_np).numpy()
 
+    # --- 1. 绘制平铺对比图 (所有切片) ---
+    # 每行显示一个切片：[Amp, Phase]
+    fig, axes = plt.subplots(D, 2, figsize=(12, 5 * D), squeeze=False)
+    
+    for d in range(D):
+        im1 = axes[d, 0].imshow(amplitudes[d], cmap='gray')
+        axes[d, 0].set_title(f"Slice {d} - Amplitude")
+        fig.colorbar(im1, ax=axes[d, 0])
+
+        im2 = axes[d, 1].imshow(phases[d], cmap='viridis')
+        axes[d, 1].set_title(f"Slice {d} - Phase")
+        fig.colorbar(im2, ax=axes[d, 1])
+
+    plt.suptitle(f"Final 3D Reconstruction ({D} Slices)", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(os.path.join(output_dir, "final_reconstruction_all_slices.png"))
+    plt.close()
+
+    # --- 2. 绘制最大强度投影 (MIP) ---
+    # 对于水凝胶中的细胞，MIP 可以一眼看到所有层中的物体
+    if D > 1:
+        mip_amp = np.max(amplitudes, axis=0)
+        # 相位投影通常取平均或标准差，这里展示平均相位
+        mean_phase = np.mean(phases, axis=0)
+
+        fig_mip, axes_mip = plt.subplots(1, 2, figsize=(12, 6))
+        axes_mip[0].imshow(mip_amp, cmap='gray')
+        axes_mip[0].set_title("Maximum Intensity Projection (Amp)")
+        axes_mip[1].imshow(mean_phase, cmap='viridis')
+        axes_mip[1].set_title("Average Phase Projection")
+        plt.savefig(os.path.join(output_dir, "final_mip_projection.png"))
+        plt.close()
+
+    # --- 3. 单独保存每一层为无损图 ---
+    slices_dir = os.path.join(output_dir, "slices")
+    os.makedirs(slices_dir, exist_ok=True)
+    
+    for d in range(D):
+        # 保存振幅
+        plt.imsave(
+            os.path.join(slices_dir, f"slice_{d}_amplitude.png"),
+            amplitudes[d],
+            cmap='gray'
+        )
+        # 保存相位
+        plt.imsave(
+            os.path.join(slices_dir, f"slice_{d}_phase.png"),
+            phases[d],
+            cmap='viridis'
+        )
+
+    print(f">>> 重建结果已保存至: {output_dir}")
+    if D > 1:
+        print(f">>> 检测到多层切片，已生成 MIP 投影图并保存每一层至 /slices 目录")
 
 def visualize_pupil(reconstructed_pupil, output_dir="output"):
     """

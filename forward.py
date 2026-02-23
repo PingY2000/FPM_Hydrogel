@@ -2,6 +2,7 @@
 """
 The FP forward model: O, P, {k_i}  →  {I_i}
 """
+
 from typing import Callable, cast
 from functools import partial
 import torch
@@ -73,12 +74,6 @@ def forward_model(
 
     return predicted_intensities
 
-
-# Use unitary Fourier transforms
-fft2 = cast(Callable[..., torch.Tensor], partial(torch.fft.fft2, norm="ortho"))
-ifft2 = cast(Callable[..., torch.Tensor], partial(torch.fft.ifft2, norm="ortho"))
-fftshift = cast(Callable[..., torch.Tensor], torch.fft.fftshift)
-ifftshift = cast(Callable[..., torch.Tensor], torch.fft.ifftshift)
 
 def forward_model_multislice(
     object_tensor: Complex[torch.Tensor, "D N N"],  # 修改：D 表示切片层数

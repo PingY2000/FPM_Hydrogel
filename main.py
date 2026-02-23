@@ -1,17 +1,13 @@
 # main.py
 
 import torch
-import matplotlib.pyplot as plt
-import numpy as np
 import os
 import json
-import pandas as pd
 
 from inverse import (
     solve_inverse, 
     solve_inverse_slice, 
-    calculate_k_vectors_from_positions, 
-    compute_k_from_rigid_body
+    calculate_k_vectors_from_positions
 )
 from utils import (
     get_default_device,
@@ -53,7 +49,7 @@ DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = True # 修正k-vector误差
-USE_RIGID_BODY= False # 启动刚体校准
+USE_RIGID_BODY= True # 启动刚体校准
 EPOCHS = 300 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
 
@@ -157,8 +153,9 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     slice_spacing=slice_spacing_m,
     tv_weight=1e-4
 )
-'''
+
 print("Reconstruction finished.")
+'''
 # --- 6. 可视化结果 & 保存结果 ---
 save_training_metrics(metrics)
 visualize_reconstruction(reconstructed_object)
