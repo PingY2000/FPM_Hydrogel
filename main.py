@@ -104,6 +104,7 @@ visualize_kspace_and_captures(
 pupil_radius_pixels = (NA_OBJECTIVE / (WAVELENGTH_NM * 1e-9)) / recon_pixel_size_m * output_size
 print(f"Calculated initial pupil radius: {pupil_radius_pixels:.1f} pixels")
 pupil_guess = create_circular_pupil((output_size, output_size), radius=int(pupil_radius_pixels))
+#pupil_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
 # E. 创建物体初始猜测
 #object_guess = 0.5 * torch.ones(int(output_size), int(output_size), dtype=torch.complex64)
@@ -112,6 +113,7 @@ import torch.nn.functional as F
 object_guess = F.interpolate(captures[0:1, None, :, :], 
                              size=(output_size, output_size), 
                              mode='bicubic')[0, 0].to(torch.complex64)
+#object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
 # --- 5. 运行FPM重建 ---
 # ----------------------------------------------------

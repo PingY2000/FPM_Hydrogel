@@ -17,10 +17,8 @@ def compute_k_from_rigid_body(
     recon_pixel_size: float,       # meters
     n_medium: float = 1.0
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    根据刚体变换参数实时计算 kx, ky
-    params: [shift_x, shift_y, shift_z, rotation_theta]
-    """
+    #params: [shift_x, shift_y, shift_z, rotation_theta]
+
     # 1. 提取参数
     dx, dy, dz, theta = params[0], params[1], params[2], params[3]
     
@@ -69,41 +67,31 @@ def calculate_k_vectors_from_positions(
 
     lambda_m = lambda_nm * 1e-9
 
-    # -------------------------
-    # 1️⃣ 读取 CSV
-    # -------------------------
+    # 1️. 读取 CSV
     df = pd.read_csv(filepath)
 
-    # -------------------------
-    # 2️⃣ 构造 LED 坐标 Tensor
-    # -------------------------
+    # 2️. 构造 LED 坐标 Tensor
     X_m = torch.tensor(df['X'].values * 1e-3, dtype=torch.float32, device=device)
     Y_m = torch.tensor(df['Y'].values * 1e-3, dtype=torch.float32, device=device)
     Z_m = torch.tensor(df['Z'].values * 1e-3, dtype=torch.float32, device=device)
 
     all_led_coords = torch.stack([X_m, Y_m, Z_m], dim=1)
 
-    # -------------------------
-    # 3️⃣ 计算 NA
-    # -------------------------
+    # 3️. 计算 NA
     #na_x = np.sin(np.arctan(X_m / Z_m))
     #na_y = np.sin(np.arctan(Y_m / Z_m))
     R = torch.sqrt(X_m**2 + Y_m**2 + Z_m**2)
     na_x = X_m / R
     na_y = Y_m / R
 
-    # -------------------------
-    # 4️⃣ 归一化 k-vectors
-    # -------------------------
+    # 4️. 归一化 k-vectors
     kx_normalized = (n_medium * na_x / lambda_m) * recon_pixel_size_m
     ky_normalized = (n_medium * na_y / lambda_m) * recon_pixel_size_m
 
     #print(f"Calculated normalized kx range: [{kx_normalized.min():.3f}, {kx_normalized.max():.3f}]")
     #print(f"Calculated normalized ky range: [{ky_normalized.min():.3f}, {ky_normalized.max():.3f}]")
 
-    # -------------------------
-    # 5️⃣ 根据 loaded_led_indices 进行筛选
-    # -------------------------
+    # 5️. 根据 loaded_led_indices 进行筛选
     indices_for_slicing = torch.tensor(
         loaded_led_indices,
         dtype=torch.long,
@@ -203,8 +191,6 @@ def solve_inverse(
     )
     
     metrics = {'loss': [], 'lr': [], 'dx': [], 'dy': [], 'dz': [], 'theta': []}
-
-
 
     if vis_interval:
         os.makedirs("output", exist_ok=True)
@@ -371,7 +357,7 @@ def solve_inverse(
 
     if vis_interval:
         # --- 4. 保存最终的高密度大图 ---
-        save_path = "output/iteration_process_dense.png"
+        save_path = "output/iteration_process.png"
         plt.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close(fig) # 释放内存，不显示窗口
         
@@ -390,7 +376,7 @@ def solve_inverse(
     return object.detach(), pupil.detach(), final_kx, final_ky, metrics
 
 def compute_tv_loss(x: torch.Tensor) -> torch.Tensor:
-    """计算 3D 复合张量的全变分 (Total Variation)"""
+    #计算 3D 复合张量的全变分 (Total Variation)
     # 空间维度 TV (X 和 Y 方向)
     tv_h = torch.sum(torch.abs(x[:, 1:, :] - x[:, :-1, :]))
     tv_w = torch.sum(torch.abs(x[:, :, 1:] - x[:, :, :-1]))
@@ -609,7 +595,7 @@ def solve_inverse_slice(
                 snapshot_count += 1
 
     if vis_interval:
-        save_path = "output/iteration_process_dense.png"
+        save_path = "output/iteration_process.png"
         plt.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close(fig) 
         print(f"\nIteration progress saved to: {save_path}")

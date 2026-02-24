@@ -16,7 +16,7 @@ def visualize_kspace_and_captures(
     captures: torch.Tensor,
     kx_normalized: torch.Tensor,
     ky_normalized: torch.Tensor,
-    output_filename: str = "output/capture_orientation_validation.png"
+    output_filename: str = "output/capture_orientation.png"
 ):
     print("Generating capture orientation validation plot...")
     
@@ -152,7 +152,7 @@ def visualize_reconstruction(reconstructed_object, output_dir="output"):
 
     plt.suptitle(f"Final 3D Reconstruction ({D} Slices)", fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(os.path.join(output_dir, "final_reconstruction_all_slices.png"))
+    plt.savefig(os.path.join(output_dir, "final_reconstruction.png"))
     plt.close()
 
     # --- 2. 绘制最大强度投影 (MIP) ---
@@ -222,9 +222,9 @@ def save_training_metrics(metrics: dict, output_dir: str = "output"):
     os.makedirs(output_dir, exist_ok=True)
 
     # 保存 JSON
-    metrics_file_path = os.path.join(output_dir, "metrics.json")
-    with open(metrics_file_path, 'w') as f:
-        json.dump(metrics, f, indent=4)
+    metrics_file_path = os.path.join(output_dir, "data", "metrics.json")
+    with open(metrics_file_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=4, ensure_ascii=False)
 
     # 画曲线
     plt.figure(figsize=(10, 5))
@@ -237,5 +237,73 @@ def save_training_metrics(metrics: dict, output_dir: str = "output"):
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(os.path.join(output_dir, "real_data_metrics_curve.png"))
+    plt.savefig(os.path.join(output_dir, "metrics_curve.png"))
     plt.close()
+
+def plot_reconstruction_progress(snapshots, init_kx, init_ky, use_rigid_body=False, save_path="output/iteration_process.png"):
+    """
+    独立的可视化函数，用于生成迭代过程的高密度大图
+    """
+    if not snapshots:
+        print("No snapshots to plot.")
+        return
+
+    num_snapshots = len(snapshots)
+    # 5 列：Obj Amp, Obj Phase, Pup Amp, Pup Phase, LED Geometry
+    fig, axes = plt.subplots(num_snapshots, 5, figsize=(20, 4 * num_snapshots))
+    if num_snapshots == 1:
+        axes = axes[np.newaxis, :] # 确保索引一致性
+    
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+    
+    init_kx_np = init_kx.cpu().numpy()
+    init_ky_np = init_ky.cpu().numpy()
+
+    for i, snap in enumerate(snapshots):
+        epoch = snap['epoch']
+        
+        # --- 1 & 2. Object 数据 ---
+        obj_np = snap['object']
+        axes[i, 0].imshow(np.abs(obj_np), cmap='gray')
+        axes[i, 0].set_title(f"Ep {epoch} | Obj Amp")
+        axes[i, 1].imshow(np.angle(obj_np), cmap='viridis')
+        axes[i, 1].set_title(f"Ep {epoch} | Obj Phase")
+
+        # --- 3 & 4. Pupil 数据 ---
+        pup_np = snap['pupil']
+        axes[i, 2].imshow(np.abs(pup_np), cmap='gray')
+        axes[i, 2].set_title(f"Ep {epoch} | Pup Amp")
+        axes[i, 3].imshow(np.angle(pup_np), cmap='magma')
+        axes[i, 3].set_title(f"Ep {epoch} | Pup Phase")
+
+        # --- 5. LED 坐标可视化 ---
+        ax_k = axes[i, 4]
+        ax_k.scatter(init_kx_np, init_ky_np, c='gray', s=12, alpha=0.3, label='Initial')
+        
+        curr_kx = snap['kx']
+        curr_ky = snap['ky']
+        ax_k.scatter(curr_kx, curr_ky, c='red', s=18, marker='x', linewidths=1, label='Current')
+
+        limit = max(np.abs(init_kx_np).max(), np.abs(init_ky_np).max()) * 1.3
+        ax_k.set_xlim(-limit, limit)
+        ax_k.set_ylim(-limit, limit)
+        ax_k.set_aspect('equal')
+        ax_k.grid(True, linestyle=':', alpha=0.5)
+        ax_k.set_title(f"Ep {epoch} | LED Geometry")
+
+        if use_rigid_body and 'rigid_params' in snap:
+            p = snap['rigid_params']
+            info_str = f"dx:{p[0]*1e3:.2f}mm dy:{p[1]*1e3:.2f}mm\ndz:{p[2]*1e3:.2f}mm rot:{np.degrees(p[3]):.2f}°"
+            ax_k.set_xlabel(info_str, fontsize=9, color='blue')
+
+        if i == 0:
+            ax_k.legend(loc='upper right', fontsize=8)
+
+        # 关闭前四列的坐标轴
+        for col in range(4):
+            axes[i, col].axis('off')
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    print(f"\nIteration progress saved to: {save_path}")
