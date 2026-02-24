@@ -15,10 +15,12 @@ from utils import (
     create_circular_pupil,
 )
 from visualize import(
+    prepare_working_directories,
     visualize_kspace_and_captures,
     visualize_reconstruction,
     visualize_pupil,
-    save_training_metrics
+    save_training_metrics,
+    plot_reconstruction_progress
 )
 
 # --- 1. 用户配置 (User Configuration) ---
@@ -45,7 +47,7 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
 LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
+DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = True # 修正k-vector误差
@@ -53,7 +55,8 @@ USE_RIGID_BODY= True # 启动刚体校准
 EPOCHS = 300 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
 
-
+# C. 重置输出文件目录
+prepare_working_directories()
 
 
 # --- 2. 设备设置 ---
@@ -119,7 +122,7 @@ object_guess = F.interpolate(captures[0:1, None, :, :],
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
 
-reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = solve_inverse(
+reconstructed_object, reconstructed_pupil, kx_f, ky_f, metrics, snapshots, init_kx, init_ky= solve_inverse(
     captures=captures,
     object=object_guess,
     pupil=pupil_guess,
@@ -155,13 +158,19 @@ reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = sol
     slice_spacing=slice_spacing_m,
     tv_weight=1e-4
 )
-
-print("Reconstruction finished.")
 '''
-# --- 6. 可视化结果 & 保存结果 ---
+print("Reconstruction finished.")
+
+
 save_training_metrics(metrics)
 visualize_reconstruction(reconstructed_object)
 visualize_pupil(reconstructed_pupil)
-
+plot_reconstruction_progress(
+        snapshots, 
+        init_kx, 
+        init_ky, 
+        use_rigid_body=True, 
+        save_path="output/iteration_process.png"
+    )
 print("\nAll plots saved to 'output' folder.")
 

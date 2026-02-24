@@ -10,7 +10,33 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import json
 import os
+import shutil
+from pathlib import Path
+import sys
 
+
+def prepare_working_directories(output_dir="output", archive_dir="last_output"):
+    """
+    归档旧输出并重新初始化输出目录结构
+    """
+    output_path = Path(output_dir)
+    archive_path = Path(archive_dir)
+
+    # 1. 如果存在旧的 output，将其归档到 last_output
+    if output_path.exists():
+        # 如果已经存在旧的 last_output，先删除它以便更新
+        if archive_path.exists():
+            shutil.rmtree(archive_path)
+        
+        # 将当前的 output 整体重命名（移动）为 last_output
+        output_path.rename(archive_path)
+        print(f">>> 已将旧数据归档至: {archive_dir}")
+
+    # 2. 创建全新的 output 及其子目录
+    (output_path / "data").mkdir(parents=True, exist_ok=True)
+    (output_path / "slice").mkdir(parents=True, exist_ok=True)
+    
+    print(f">>> 已初始化目录结构: {output_dir}/data 和 {output_dir}/slices")
 
 def visualize_kspace_and_captures(
     captures: torch.Tensor,
@@ -188,7 +214,6 @@ def visualize_reconstruction(reconstructed_object, output_dir="output"):
             cmap='viridis'
         )
 
-    print(f">>> 重建结果已保存至: {output_dir}")
     if D > 1:
         print(f">>> 检测到多层切片，已生成 MIP 投影图并保存每一层至 /slices 目录")
 
@@ -245,8 +270,11 @@ def plot_reconstruction_progress(snapshots, init_kx, init_ky, use_rigid_body=Fal
     独立的可视化函数，用于生成迭代过程的高密度大图
     """
     if not snapshots:
-        print("No snapshots to plot.")
         return
+
+    #行显示状态
+    save_msg = f"Saving final image to {save_path}..." 
+    print(save_msg, end='', flush=True)
 
     num_snapshots = len(snapshots)
     # 5 列：Obj Amp, Obj Phase, Pup Amp, Pup Phase, LED Geometry
@@ -306,4 +334,6 @@ def plot_reconstruction_progress(snapshots, init_kx, init_ky, use_rigid_body=Fal
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, bbox_inches='tight', dpi=150)
     plt.close(fig)
-    print(f"\nIteration progress saved to: {save_path}")
+
+    #删除行显示
+    print("\r\033[K",end='', flush=True)
