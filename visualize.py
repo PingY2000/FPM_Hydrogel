@@ -34,7 +34,7 @@ def prepare_working_directories(output_dir="output", archive_dir="last_output"):
 
     # 2. 创建全新的 output 及其子目录
     (output_path / "data").mkdir(parents=True, exist_ok=True)
-    (output_path / "slice").mkdir(parents=True, exist_ok=True)
+    (output_path / "slices").mkdir(parents=True, exist_ok=True)
     
     print(f">>> 已初始化目录结构: {output_dir}/data 和 {output_dir}/slices")
 

@@ -6,7 +6,6 @@ import json
 
 from inverse import (
     solve_inverse, 
-    solve_inverse_slice, 
     calculate_k_vectors_from_positions
 )
 from utils import (
@@ -50,7 +49,7 @@ CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
-LEARN_K_VECTORS = True # 修正k-vector误差
+LEARN_K_VECTORS = False # 修正k-vector误差
 USE_RIGID_BODY= True # 启动刚体校准
 EPOCHS = 300 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
