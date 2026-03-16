@@ -206,7 +206,7 @@ def solve_inverse(
     # Training loop
     for _ in loop:
         if use_rigid_body:
-            if _ > 100: 
+            if _ > 200: 
                 # 允许梯度更新
                 rigid_params.requires_grad_(True)
                 curr_kx, curr_ky = compute_k_from_rigid_body(

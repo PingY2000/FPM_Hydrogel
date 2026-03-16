@@ -1,5 +1,5 @@
 # main.py
-
+from autofocus import estimate_defocus_from_phase_correlation, digital_refocus
 import torch
 import os
 import json
@@ -46,12 +46,12 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
 LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
+DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = False # 修正k-vector误差
 USE_RIGID_BODY= True # 启动刚体校准
-EPOCHS = 300 # Epochs 上限
+EPOCHS = 200 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
 
 # C. 重置输出文件目录
@@ -117,6 +117,33 @@ object_guess = F.interpolate(captures[0:1, None, :, :],
                              mode='bicubic')[0, 0].to(torch.complex64)
 #object_guess = 0.5 * torch.ones(output_size, output_size, dtype=torch.complex64)
 
+# --- 4.5. 提前估计离焦量 z ---
+# 选取中心图像和相邻的一个明场图像 (例如索引0和索引1)
+# 注意：你需要从 loaded_led_indices 找到中心灯和相邻灯的实际物理 NA
+print("\nEstimating defocus z using Phase Correlation...")
+# 这里假设 captures[0] 是中心，captures[1] 是一侧的明场灯
+# 为了获取 captures[1] 对应的真实物理 NA，我们从 led_coords_batch 计算：
+idx_center = 0 
+idx_tilted = 1 
+
+# 计算物方原图的等效像素大小 (缩放前的像素大小)
+original_pixel_size_obj_m = (CAMERA_PIXEL_SIZE_UM * 1e-6 / MAGNIFICATION)
+
+# 从你算好的坐标里提取对应的物理 NA
+x_tilted, y_tilted, z_tilted = led_coords_batch[idx_tilted]
+R_tilted = torch.sqrt(x_tilted**2 + y_tilted**2 + z_tilted**2)
+na_x_tilted = (x_tilted / R_tilted).item()
+na_y_tilted = (y_tilted / R_tilted).item()
+
+estimated_z = estimate_defocus_from_phase_correlation(
+    img_center=captures[idx_center],
+    img_tilted=captures[idx_tilted],
+    na_x=na_x_tilted,
+    na_y=na_y_tilted,
+    pixel_size_obj_m=original_pixel_size_obj_m
+)
+print(f"Estimated Defocus (z): {estimated_z * 1e6:.2f} um")
+
 # --- 5. 运行FPM重建 ---
 # ----------------------------------------------------
 print("\nStarting FPM reconstruction on real data....")
@@ -136,33 +163,23 @@ reconstructed_object, reconstructed_pupil, kx_f, ky_f, metrics, snapshots, init_
     vis_interval=VIS_INTERVAL
 )
 
-'''
-D = 1
-slice_spacing_m = 10e-6
-object_guess = torch.ones((D, output_size, output_size), dtype=torch.complex64, device=pytorch_device)
-
-reconstructed_object, reconstructed_pupil, learned_kx, learned_ky, metrics = solve_inverse_slice(
-    captures=captures,
-    object=object_guess,
-    pupil=pupil_guess,
-    led_physics_coords=led_coords_batch if USE_RIGID_BODY else None,
-    wavelength=wavelength_val,
-    recon_pixel_size=recon_pixel_size_m,
-    kx_batch=kx_estimated, 
-    ky_batch=ky_estimated, 
-    learn_pupil=LEARN_PUPIL,       
-    learn_k_vectors=LEARN_K_VECTORS, 
-    epochs=EPOCHS, 
-    vis_interval=VIS_INTERVAL,
-    slice_spacing=slice_spacing_m,
-    tv_weight=1e-4
+# --- 6. 数字重聚焦 (Digital Refocusing) ---
+print(f"\nApplying Fresnel Digital Refocusing by {-estimated_z * 1e6:.2f} um...")
+refocused_object = digital_refocus(
+    complex_obj=reconstructed_object,
+    z_m=-estimated_z, 
+    wavelength_m=wavelength_val,
+    pixel_size_m=recon_pixel_size_m,
+    use_exact=True
 )
-'''
+
 print("Reconstruction finished.")
 
 
 save_training_metrics(metrics)
-visualize_reconstruction(reconstructed_object)
+
+#visualize_reconstruction(reconstructed_object)
+visualize_reconstruction(refocused_object)
 visualize_pupil(reconstructed_pupil)
 plot_reconstruction_progress(
         snapshots, 
