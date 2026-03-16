@@ -1,6 +1,6 @@
 import torch
 import torch.fft as fft
-
+'''
 def estimate_defocus_from_phase_correlation(
     img_center: torch.Tensor, 
     img_tilted: torch.Tensor, 
@@ -52,6 +52,76 @@ def estimate_defocus_from_phase_correlation(
     tan_theta_y = na_y / (1 - na_x**2 - na_y**2 + 1e-8)**0.5
     
     # 分别从 x 和 y 方向估计 z，取加权平均或直接用绝对值较大的方向避免除零
+    z_x = dx_m / tan_theta_x if abs(tan_theta_x) > 1e-3 else 0.0
+    z_y = dy_m / tan_theta_y if abs(tan_theta_y) > 1e-3 else 0.0
+    
+    if abs(tan_theta_x) > abs(tan_theta_y):
+        z_est = z_x
+    else:
+        z_est = z_y
+        
+    return z_est
+'''
+
+def estimate_defocus_from_phase_correlation(
+    img_center: torch.Tensor, 
+    img_tilted: torch.Tensor, 
+    na_x: float, 
+    na_y: float, 
+    pixel_size_obj_m: float
+) -> float:
+    # === 关键修复 1：减去均值 (去除 DC 分量致盲效应) ===
+    img1 = img_center - torch.mean(img_center)
+    img2 = img_tilted - torch.mean(img_tilted)
+    
+    # === 关键修复 2：加二维汉明窗 (抑制傅里叶变换的边缘截断伪影) ===
+    H, W = img1.shape
+    win_y = torch.hann_window(H, device=img1.device).view(H, 1)
+    win_x = torch.hann_window(W, device=img1.device).view(1, W)
+    window = win_y * win_x
+    
+    img1 = img1 * window
+    img2 = img2 * window
+
+    # 1. 计算 FFT
+    F1 = fft.fft2(img1)
+    F2 = fft.fft2(img2)
+    
+    # 2. 计算归一化互功率谱 (提纯相位)
+    R = F1 * F2.conj()
+    R = R / (torch.abs(R) + 1e-8)
+    
+    # 3. IFFT 回到空域寻找狄拉克峰
+    r = fft.ifft2(R).real
+    r = fft.fftshift(r) # 将零频移到中心
+    
+    # 4. 寻找峰值坐标 (整像素精度)
+    max_idx = torch.argmax(r)
+    y_peak = (max_idx // W).item()
+    x_peak = (max_idx % W).item()
+    
+    # === 亚像素插值 (Sub-pixel Interpolation) ===
+    def quadratic_interp(val_m1, val_0, val_p1):
+        denom = 2 * (val_m1 - 2 * val_0 + val_p1)
+        if abs(denom) > 1e-6:
+            return (val_m1 - val_p1) / denom
+        return 0.0
+
+    delta_x = quadratic_interp(r[y_peak, x_peak - 1].item(), r[y_peak, x_peak].item(), r[y_peak, x_peak + 1].item()) if 0 < x_peak < W - 1 else 0.0
+    delta_y = quadratic_interp(r[y_peak - 1, x_peak].item(), r[y_peak, x_peak].item(), r[y_peak + 1, x_peak].item()) if 0 < y_peak < H - 1 else 0.0
+
+    dx_pix = (x_peak + delta_x) - W // 2
+    dy_pix = (y_peak + delta_y) - H // 2
+    # ===================================================
+    
+    # 转换为物方平移物理距离 (米)
+    dx_m = dx_pix * pixel_size_obj_m
+    dy_m = dy_pix * pixel_size_obj_m
+    
+    # 5. 根据平移量和照明角度计算离焦 z
+    tan_theta_x = na_x / (1 - na_x**2 - na_y**2 + 1e-8)**0.5
+    tan_theta_y = na_y / (1 - na_x**2 - na_y**2 + 1e-8)**0.5
+    
     z_x = dx_m / tan_theta_x if abs(tan_theta_x) > 1e-3 else 0.0
     z_y = dy_m / tan_theta_y if abs(tan_theta_y) > 1e-3 else 0.0
     

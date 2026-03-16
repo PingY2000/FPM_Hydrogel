@@ -1,5 +1,5 @@
 # main.py
-from autofocus import estimate_defocus_from_phase_correlation, digital_refocus
+from refocus import estimate_defocus_from_phase_correlation, digital_refocus
 import torch
 import os
 import json
@@ -46,7 +46,7 @@ print(f"NA: {NA_OBJECTIVE}\nWavelength: {WAVELENGTH_NM}nm\nMag: {MAGNIFICATION}x
 CAPTURES_PATH = "D:\FPM_Dataset\OnTest\TIF" # 原始图片文件目录
 LED_POSITIONS_FILE = "led_positions.csv" # LED位置文件
 CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
-DOWNSAMPLE_FACTOR = 2       # 生成图片分辨率倍数
+DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
 LEARN_K_VECTORS = False # 修正k-vector误差
