@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import json
 
 # 导入你现有的模块
 from forward import forward_model
@@ -249,8 +250,8 @@ os.makedirs("output_simulation", exist_ok=True)
 fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
 # 行1：Ground Truth
-im0 = axes[0, 0].imshow(simulated_captures[center_idx].cpu().numpy(), cmap='gray')
-axes[0, 0].set_title(f"Center Low-Res Capture\n(NA: {NA_OBJECTIVE})", fontsize=12)
+im0 = axes[1, 0].imshow(simulated_captures[center_idx].cpu().numpy(), cmap='gray')
+axes[1, 0].set_title(f"Center Low-Res Capture\n(NA: {NA_OBJECTIVE})", fontsize=12)
 
 im1 = axes[0, 1].imshow(gt_amp, cmap='gray')
 axes[0, 1].set_title("Ground Truth Amplitude", fontsize=12)
@@ -261,10 +262,10 @@ axes[0, 2].set_title("Ground Truth Phase", fontsize=12)
 fig.colorbar(im2, ax=axes[0, 2], fraction=0.046, pad=0.04)
 
 # 行2：Reconstruction
-axes[1, 0].plot(metrics['loss'], color='red', linewidth=2)
-axes[1, 0].set_title("Convergence Curve (L1 Loss)", fontsize=12)
-axes[1, 0].set_xlabel("Epochs")
-axes[1, 0].grid(True, linestyle='--')
+axes[0, 0].plot(metrics['loss'], color='red', linewidth=2)
+axes[0, 0].set_title("Convergence Curve (L1 Loss)", fontsize=12)
+axes[0, 0].set_xlabel("Epochs")
+axes[0, 0].grid(True, linestyle='--')
 
 im3 = axes[1, 1].imshow(recon_amp, cmap='gray')
 axes[1, 1].set_title(f"Reconstructed Amplitude\nPSNR: {psnr_amp:.2f} dB", fontsize=12)
@@ -283,7 +284,7 @@ plt.show()
 # ==========================================
 # 7. 独立导出高保真重构振幅与相位图 (供论文高清排版使用)
 # ==========================================
-recon_save_dir = "output_simulation/reconstruction_results"
+recon_save_dir = "output_simulation/sim_4_4_1_reconstruction_results"
 os.makedirs(recon_save_dir, exist_ok=True)
 
 print("正在单独导出重建与基准图像的高清切片...")
@@ -321,3 +322,10 @@ plt.imsave(
 )
 
 print(f">>> 独立的重建图片已全部无损保存至: {recon_save_dir} 文件夹中。")
+
+
+# 遵循 main.py 的规范，将完整的 metrics 字典保存为 metrics.json
+json_path = os.path.join(recon_save_dir, "metrics.json")
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(metrics, f, indent=4, ensure_ascii=False)
+    print(f">>> Metrics JSON 数据已汇总至目录: {recon_save_dir}")
