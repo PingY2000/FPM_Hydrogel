@@ -12,6 +12,7 @@ temp/
 TEMP/
 output/
 last_output/
+output_simulation/
 
 # IDE 和编辑器生成的文件
 *.swp

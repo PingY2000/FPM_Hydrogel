@@ -49,9 +49,9 @@ CENTER_LED_INDEX = 1        # 对应中心照明的LED的索引号 (从1开始)
 DOWNSAMPLE_FACTOR = 1       # 生成图片分辨率倍数
 
 LEARN_PUPIL = True # 校正像差
-LEARN_K_VECTORS = False # 修正k-vector误差
+LEARN_K_VECTORS = True # 修正k-vector误差
 USE_RIGID_BODY= True # 启动刚体校准
-EPOCHS = 200 # Epochs 上限
+EPOCHS = 500 # Epochs 上限
 VIS_INTERVAL = 20 # 迭代过程图片展示间隔
 
 # C. 重置输出文件目录
