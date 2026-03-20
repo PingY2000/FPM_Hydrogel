@@ -176,7 +176,7 @@ center_idx = torch.argmin(kx_ideal**2 + ky_ideal**2)
 obj_guess_amp = F.interpolate(simulated_captures[center_idx:center_idx+1].unsqueeze(0), size=(N_RECON, N_RECON), mode='bicubic')[0, 0]
 obj_guess = torch.complex(obj_guess_amp, torch.zeros_like(obj_guess_amp)).to(device)
 
-EPOCHS = 400 # 统一迭代次数以公平对比时间
+EPOCHS = 200 # 统一迭代次数以公平对比时间
 
 # 定量指标计算函数
 def calc_metrics(recon_obj):

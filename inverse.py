@@ -170,7 +170,7 @@ def solve_inverse(
     if use_rigid_body:
         # 刚体参数 [dx, dy, dz, theta]
         learned_tensors.append({'params': rigid_params})
-        base_max_lrs.append(8e-3) # 这里设为 1e-3，OneCycle 会从约 4e-5 开始增加
+        base_max_lrs.append(3e-3) # 这里设为 1e-3，OneCycle 会从约 4e-5 开始增加
     elif learn_k_vectors:
         # 旧模式：独立优化每个 LED 的 kx, ky
         learned_tensors.append({'params': curr_kx})

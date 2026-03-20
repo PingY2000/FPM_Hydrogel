@@ -236,53 +236,59 @@ recon_object, _, _, _, metrics, _, _, _ = solve_inverse(
     epochs=400,                          # 需要较多迭代次数以保证刚体参数收敛 
     vis_interval=0
 )
-
 # ==========================================
-# 6. 核心学术图表绘制：参数收敛曲线
+# 6. 核心学术图表绘制：参数收敛曲线 (中文论文规范版)
 # ==========================================
 os.makedirs("output_simulation", exist_ok=True)
 
+# 确保支持中文显示
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
+plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
+
 # 提取优化过程中的参数记录
 epochs_array = np.arange(len(metrics['dx']))
-# 注意：在 inverse.py 中，刚体优化通常在 200 epoch 后才激活 (requires_grad_(True))
-# 我们绘制全过程，展示参数从 0 开始逼近真值的过程
 dx_history = np.array(metrics['dx']) * 1e3 # 转为 mm
 dy_history = np.array(metrics['dy']) * 1e3 # 转为 mm
 theta_history = np.degrees(np.array(metrics['theta'])) # 转为度
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-fig.suptitle("Rigid Body Error Convergence Analysis", fontsize=16, fontweight='bold')
 
 # --- 子图 1: DX 逼近曲线 ---
-axes[0].plot(epochs_array, dx_history, label='Estimated $dx$', color='blue', linewidth=2)
-axes[0].axhline(y=TRUE_DX*1e3, color='red', linestyle='--', label='Ground Truth (1.5 mm)')
-axes[0].set_title("Translation X Convergence", fontsize=14)
-axes[0].set_xlabel("Epochs", fontsize=12)
-axes[0].set_ylabel("Shift (mm)", fontsize=12)
-axes[0].legend()
+axes[0].plot(epochs_array, dx_history, label='算法反演值 $d_x$', color='blue', linewidth=2)
+# 注意这里的标签数值要和你的 TRUE_DX 设定一致 (0.3mm)
+axes[0].axhline(y=TRUE_DX*1e3, color='red', linestyle='--', label='预设误差值 (0.3 mm)') 
+axes[0].set_xlabel("迭代次数", fontsize=12)
+axes[0].set_ylabel("x轴偏移量  mm", fontsize=12)
+axes[0].legend(fontsize=12, loc='upper right')
 axes[0].grid(True, linestyle=':')
+# 在左上角添加 (a)
+axes[0].text(0.05, 1.08, "(a)", transform=axes[0].transAxes, fontsize=18, fontweight='bold', va='top', ha='right')
 
 # --- 子图 2: DY 逼近曲线 ---
-axes[1].plot(epochs_array, dy_history, label='Estimated $dy$', color='green', linewidth=2)
-axes[1].axhline(y=TRUE_DY*1e3, color='red', linestyle='--', label='Ground Truth (-2.0 mm)')
-axes[1].set_title("Translation Y Convergence", fontsize=14)
-axes[1].set_xlabel("Epochs", fontsize=12)
-axes[1].set_ylabel("Shift (mm)", fontsize=12)
-axes[1].legend()
+axes[1].plot(epochs_array, dy_history, label='算法反演值 $d_y$', color='green', linewidth=2)
+# 注意这里的标签数值要和你的 TRUE_DY 设定一致 (-0.8mm)
+axes[1].axhline(y=TRUE_DY*1e3, color='red', linestyle='--', label='预设误差值 (-0.8 mm)')
+axes[1].set_xlabel("迭代次数", fontsize=12)
+axes[1].set_ylabel("y轴偏移量  mm", fontsize=12)
+axes[1].legend(fontsize=12, loc='upper right')
 axes[1].grid(True, linestyle=':')
+# 在左上角添加 (b)
+axes[1].text(0.05, 1.08, "(b)", transform=axes[1].transAxes, fontsize=18, fontweight='bold', va='top', ha='right')
 
 # --- 子图 3: Theta 逼近曲线 ---
-axes[2].plot(epochs_array, theta_history, label='Estimated $\\theta$', color='purple', linewidth=2)
-axes[2].axhline(y=np.degrees(TRUE_THETA), color='red', linestyle='--', label='Ground Truth (2.0°)')
-axes[2].set_title("Rotation $\\theta$ Convergence", fontsize=14)
-axes[2].set_xlabel("Epochs", fontsize=12)
-axes[2].set_ylabel("Angle (Degrees)", fontsize=12)
-axes[2].legend()
+axes[2].plot(epochs_array, theta_history, label='算法反演值 $\\theta$', color='purple', linewidth=2)
+# 注意这里的标签数值要和你的 TRUE_THETA 设定一致 (0.4度)
+axes[2].axhline(y=np.degrees(TRUE_THETA), color='red', linestyle='--', label='预设误差值 (0.4$^\circ$)')
+axes[2].set_xlabel("迭代次数", fontsize=12)
+axes[2].set_ylabel("旋转角度  $^\circ$", fontsize=12)
+axes[2].legend(fontsize=12, loc='upper right')
 axes[2].grid(True, linestyle=':')
+# 在左上角添加 (c)
+axes[2].text(0.05, 1.08, "(c)", transform=axes[2].transAxes, fontsize=18, fontweight='bold', va='top', ha='right')
 
 plt.tight_layout()
 save_path_curves = "output_simulation/sim_4_4_2_rigid_body_curves.png"
-plt.savefig(save_path_curves, dpi=200)
+plt.savefig(save_path_curves, dpi=150, bbox_inches='tight') # dpi 提高到300，增加 bbox_inches 防止标签被裁
 print(f"刚体校准收敛曲线已保存至: {save_path_curves}")
 plt.show()
 
